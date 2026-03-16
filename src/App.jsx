@@ -18,23 +18,18 @@ export default function App() {
   const [view, setView] = useState("dashboard");
   const [toast, setToast] = useState(null);
   const [migrated, setMigrated] = useState(false);
-
-  // Modal state
   const [showAddTicket, setShowAddTicket] = useState(false);
   const [showAddSale, setShowAddSale] = useState(false);
   const [editingTicket, setEditingTicket] = useState(null);
   const [tf, setTf] = useState(BLANK_TICKET);
   const [sf, setSf] = useState(BLANK_SALE);
 
-  // Migrate localStorage data to Supabase on first load
   useEffect(() => {
     if (loading || migrated) return;
     const alreadyMigrated = localStorage.getItem('queud_migrated_to_supabase');
     if (alreadyMigrated) return;
-
     const localTickets = JSON.parse(localStorage.getItem('queud_tickets') || '[]');
     const localSales = JSON.parse(localStorage.getItem('queud_sales') || '[]');
-
     if (localTickets.length > 0 || localSales.length > 0) {
       notify(`Migrating ${localTickets.length} tickets and ${localSales.length} sales to Supabase...`);
       Promise.all([
@@ -43,7 +38,7 @@ export default function App() {
       ]).then(() => {
         localStorage.setItem('queud_migrated_to_supabase', 'true');
         setMigrated(true);
-        notify(`✓ Migrated ${localTickets.length} tickets to Supabase`);
+        notify(`Migrated ${localTickets.length} tickets to Supabase`);
       });
     } else {
       localStorage.setItem('queud_migrated_to_supabase', 'true');
@@ -61,11 +56,11 @@ export default function App() {
       setTickets(prev => prev.map(t => t.id === editingTicket.id
         ? { ...tf, id: t.id, qty: parseInt(tf.qty), costPrice: parseFloat(tf.costPrice), qtyAvailable: (t.qtyAvailable ?? t.qty) + (parseInt(tf.qty) - t.qty) }
         : t));
-      notify("Ticket updated ✓");
+      notify("Ticket updated");
     } else {
       const qty = parseInt(tf.qty);
       setTickets(prev => [...prev, { ...tf, id: uid(), addedAt: new Date().toISOString(), qty, costPrice: parseFloat(tf.costPrice), qtyAvailable: qty }]);
-      notify("Added to inventory ✓");
+      notify("Added to inventory");
     }
     setShowAddTicket(false); setEditingTicket(null); setTf(BLANK_TICKET);
   };
@@ -117,7 +112,7 @@ export default function App() {
   const openSale = (ticketId) => { setSf({ ...BLANK_SALE, ticketId }); setShowAddSale(true); };
 
   if (loading) return (
-    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f1f5f9", fontFamily: "sans-serif" }}>
+    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f7f8fa", fontFamily: "'DM Sans', sans-serif" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 32, marginBottom: 16 }}>🎟️</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Loading Queud...</div>
@@ -127,10 +122,10 @@ export default function App() {
   );
 
   if (error) return (
-    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f1f5f9", fontFamily: "sans-serif" }}>
+    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f7f8fa", fontFamily: "'DM Sans', sans-serif" }}>
       <div style={{ textAlign: "center", maxWidth: 400 }}>
         <div style={{ fontSize: 32, marginBottom: 16 }}>⚠️</div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626", marginBottom: 8 }}>Database Error</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>Database Error</div>
         <div style={{ fontSize: 13, color: "#64748b" }}>{error}</div>
       </div>
     </div>
@@ -138,51 +133,52 @@ export default function App() {
 
   return (
     <div style={{
-      "--navy": "#0f172a", "--navy2": "#1e293b",
-      "--sidebar": "#0d1117", "--sidebar-hover": "rgba(255,255,255,0.06)",
-      "--orange": "#f97316", "--orange-light": "#fff7ed",
-      "--text": "#e2e8f0", "--muted": "#64748b", "--muted2": "#94a3b8",
-      "--border": "#1e2a3a", "--border2": "#243044",
-      "--card": "#111827", "--card2": "#0d1520",
-      "--green": "#22c55e", "--red": "#ef4444",
-      "--display": "'Nunito', sans-serif", "--body": "'Nunito', sans-serif",
-      display: "flex", height: "100vh", fontFamily: "var(--body)", background: "#0a0f1a", color: "var(--text)", overflow: "hidden"
+      "--navy": "#1a3a6e", "--navy2": "#15306b",
+      "--bg": "#f7f8fa", "--surface": "#ffffff",
+      "--border": "#e2e6ea", "--border2": "#d1d9e0",
+      "--text": "#0f172a", "--text2": "#374151",
+      "--muted": "#64748b", "--muted2": "#94a3b8",
+      "--orange": "#f97316", "--blue": "#1a3a6e",
+      "--green": "#059669", "--red": "#ef4444", "--yellow": "#f59e0b",
+      "--display": "'DM Sans', sans-serif", "--body": "'DM Sans', sans-serif",
+      display: "flex", height: "100vh", fontFamily: "var(--body)", background: "var(--bg)", color: "var(--text)", overflow: "hidden"
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        .hover-row { transition: background 0.1s; }
-        .hover-row:hover { background: rgba(255,255,255,0.03); }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .fade-up { animation: fadeUp 0.2s ease forwards; }
-        .action-btn { background: var(--orange); color: white; border: none; border-radius: 10px; padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: var(--body); transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
-        .action-btn:hover { opacity: 0.9; transform: translateY(-1px); }
-        .ghost-btn { background: rgba(255,255,255,0.05); color: #94a3b8; border: 1.5px solid #1e2a3a; border-radius: 10px; padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--body); transition: all 0.15s; }
-        .ghost-btn:hover { border-color: var(--orange); color: var(--orange); }
-        .del-btn { background: rgba(239,68,68,0.15); color: #ef4444; border: none; border-radius: 7px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--body); }
+        .hover-row { transition: background 0.12s; }
+        .hover-row:hover { background: #f7f8fa !important; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .fade-up { animation: fadeUp 0.22s ease forwards; }
+        .action-btn { background: #f97316; color: white; border: none; border-radius: 9px; padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--body); transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; letter-spacing: -0.1px; box-shadow: 0 1px 3px rgba(249,115,22,0.3); }
+        .action-btn:hover { background: #ea6c0a; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(249,115,22,0.35); }
+        .ghost-btn { background: transparent; color: #64748b; border: 1px solid #e2e6ea; border-radius: 9px; padding: 8px 16px; font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: var(--body); transition: all 0.15s; }
+        .ghost-btn:hover { border-color: #1a3a6e; color: #1a3a6e; background: rgba(26,58,110,0.04); }
+        .del-btn { background: rgba(239,68,68,0.08); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); border-radius: 7px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--body); transition: all 0.15s; }
+        .del-btn:hover { background: rgba(239,68,68,0.14); }
         input, select, textarea { box-sizing: border-box; }
-        input::placeholder, textarea::placeholder { color: #334155; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        input::placeholder, textarea::placeholder { color: #94a3b8; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #1e2a3a; border-radius: 3px; }
-        select option { background: #111827; color: #e2e8f0; }
+        ::-webkit-scrollbar-thumb { background: #d1d9e0; border-radius: 4px; }
+        select option { background: #ffffff; color: #0f172a; }
       `}</style>
 
       <Sidebar view={view} setView={setView} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ background: "#0d1520", borderBottom: "1px solid #1e2a3a", padding: "0 32px", display: "flex", alignItems: "center", height: 52, flexShrink: 0, gap: 8 }}>
-          <span style={{ fontSize: 11, color: "#334155", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>Queud</span>
-          <span style={{ fontSize: 11, color: "#1e2a3a" }}>/</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "capitalize" }}>{view}</span>
+        <div style={{ background: "#ffffff", borderBottom: "0.5px solid #e2e6ea", padding: "0 28px", display: "flex", alignItems: "center", height: 52, flexShrink: 0, gap: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase" }}>Queud</span>
+          <span style={{ fontSize: 11, color: "#e2e6ea" }}>/</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", textTransform: "capitalize", letterSpacing: "-0.1px" }}>{view}</span>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e" }} />
-            <span style={{ fontSize: 10, color: "#334155" }}>Supabase</span>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }} />
+            <span style={{ fontSize: 10, color: "#94a3b8" }}>Supabase</span>
           </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
           {view === "dashboard" && <Dashboard tickets={tickets} sales={sales} setView={setView} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} />}
           {view === "inventory" && <Inventory tickets={tickets} setTickets={setTickets} sales={sales} setSales={setSales} settings={settings} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} openSale={openSale} notify={notify} />}
           {view === "sales" && <Sales tickets={tickets} sales={sales} setShowAddSale={setShowAddSale} />}
@@ -194,7 +190,7 @@ export default function App() {
       {showAddSale && <RecordSaleModal sf={sf} setSf={setSf} tickets={tickets} setShowAddSale={setShowAddSale} saveSale={saveSale} />}
 
       {toast && (
-        <div style={{ position: "fixed", bottom: 24, right: 24, background: toast.type === "err" ? "#fee2e2" : "var(--navy)", color: toast.type === "err" ? "#dc2626" : "white", padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, zIndex: 999, animation: "toastIn 0.3s ease", boxShadow: "0 8px 24px rgba(15,23,42,0.2)", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ position: "fixed", bottom: 24, right: 24, background: toast.type === "err" ? "#fef2f2" : "#ffffff", color: toast.type === "err" ? "#ef4444" : "#0f172a", padding: "12px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, zIndex: 999, animation: "toastIn 0.25s ease", border: toast.type === "err" ? "1px solid #fecaca" : "1px solid #e2e6ea", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}>
           <span>{toast.type === "err" ? "⚠️" : "✓"}</span> {toast.msg}
         </div>
       )}

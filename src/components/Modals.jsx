@@ -56,7 +56,7 @@ export function AddTicketModal({ tf, setTf, editingTicket, setEditingTicket, set
           <Field label="Quantity *"><Input value={tf.qty} onChange={v => setTf(f => ({ ...f, qty: v }))} type="number" min="1" /></Field>
           <Field label="Amount Paid *"><Input value={tf.costPrice} onChange={v => setTf(f => ({ ...f, costPrice: v }))} type="number" step="0.01" placeholder="0.00" /></Field>
           <Field label="Price per Ticket">
-            <div style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", padding: "10px 14px", borderRadius: 7, fontSize: 13, color: "#111827", fontWeight: 700 }}>
+            <div style={{ background: "#f7f8fa", border: "1.5px solid #1c2840", padding: "9px 13px", borderRadius: 8, fontSize: 13, color: "#0f172a", fontWeight: 700 }}>
               {tf.costPrice && tf.qty ? fmt(parseFloat(tf.costPrice) / parseInt(tf.qty)) : "—"}
             </div>
           </Field>
@@ -70,21 +70,20 @@ export function AddTicketModal({ tf, setTf, editingTicket, setEditingTicket, set
           <Field label="Notes"><Input value={tf.notes} onChange={v => setTf(f => ({ ...f, notes: v }))} placeholder="Optional" /></Field>
         </div>
 
-        {/* Currency info */}
         {(tf.originalCurrency && tf.originalCurrency !== "USD" && tf.originalAmount > 0) ? (
-          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, padding: "12px 16px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginBottom: 8 }}>💱 Currency Conversion</div>
+          <div style={{ background: "rgba(26,58,110,0.06)", border: "1px solid rgba(46,124,246,0.2)", borderRadius: 8, padding: "12px 16px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", marginBottom: 10, letterSpacing: "0.5px", textTransform: "uppercase" }}>Currency Conversion</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 3 }}>ORIGINAL</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>{fmtCurrency(tf.originalAmount, tf.originalCurrency)}</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px" }}>Original</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a" }}>{fmtCurrency(tf.originalAmount, tf.originalCurrency)}</div>
               </div>
               <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 3 }}>RATE</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>×{parseFloat(tf.exchangeRate || 1).toFixed(4)}</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px" }}>Rate</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a" }}>×{parseFloat(tf.exchangeRate || 1).toFixed(4)}</div>
               </div>
               <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 3 }}>USD</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px" }}>USD</div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#f97316" }}>{fmt(tf.costPrice)}</div>
               </div>
             </div>
@@ -127,8 +126,8 @@ export function RecordSaleModal({ sf, setSf, tickets, setShowAddSale, saveSale }
         {sf.ticketId && (() => {
           const t = tickets.find(x => x.id === sf.ticketId);
           return t ? (
-            <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 7, padding: "10px 14px", fontSize: 12, color: "#9a3412" }}>
-              Cost basis: <b>{fmt(t.costPrice / t.qty)}</b> per ticket · Total cost: <b>{fmt(t.costPrice)}</b>
+            <div style={{ background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#94a3b8" }}>
+              Cost basis: <b style={{ color: "#0f172a" }}>{fmt(t.costPrice / t.qty)}</b> per ticket · Total cost: <b style={{ color: "#0f172a" }}>{fmt(t.costPrice)}</b>
             </div>
           ) : null;
         })()}
@@ -152,16 +151,16 @@ export function RecordSaleModal({ sf, setSf, tickets, setShowAddSale, saveSale }
           const profit = (price * qty) - (costPer * qty) - fees;
           const roi = costPer > 0 ? ((price - costPer) / costPer) * 100 : 0;
           return (
-            <div style={{ background: profit >= 0 ? "#f0fdf4" : "#fef2f2", border: `2px solid ${profit >= 0 ? "#bbf7d0" : "#fecaca"}`, borderRadius: 7, padding: 18 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: "#6b7280", marginBottom: 12, textTransform: "uppercase" }}>Projected P&L</div>
+            <div style={{ background: profit >= 0 ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", border: `1px solid ${profit >= 0 ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: "#64748b", marginBottom: 12, textTransform: "uppercase" }}>Projected P&L</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                {[["NET PROFIT", profit >= 0 ? "+" : "", fmt(profit), profit >= 0 ? "var(--green)" : "var(--red)"],
-                  ["REVENUE", "", fmt(price * qty), "var(--orange)"],
-                  ["ROI", "", fmtPct(roi), roi >= 0 ? "var(--green)" : "var(--red)"]
+                {[["NET PROFIT", profit >= 0 ? "+" : "", fmt(profit), profit >= 0 ? "#10b981" : "#ef4444"],
+                  ["REVENUE", "", fmt(price * qty), "#f97316"],
+                  ["ROI", "", fmtPct(roi), roi >= 0 ? "#10b981" : "#ef4444"]
                 ].map(([label, pre, val, color]) => (
                   <div key={label} style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 700, fontSize: 24, color }}>{pre}{val}</div>
+                    <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 4, letterSpacing: "0.5px" }}>{label}</div>
+                    <div style={{ fontWeight: 700, fontSize: 22, color }}>{pre}{val}</div>
                   </div>
                 ))}
               </div>
@@ -196,108 +195,103 @@ export function TicketDetailModal({ ticket, onClose, onEdit, onSell, fmt, fmtCur
   const hasConversion = ticket.originalCurrency && ticket.originalCurrency !== "USD" && ticket.originalAmount > 0;
   const isRestricted = ticket.restrictions && /restrict/i.test(ticket.restrictions);
 
+  const fmtDate = (d) => {
+    if (!d) return "—";
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) { const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return `${parseInt(m[3])} ${months[parseInt(m[2])-1]} ${m[1]}`; }
+    return d;
+  };
+
   return (
     <Modal title="Ticket Details" onClose={onClose} wide>
-      <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
         {/* Event header */}
-        <div style={{ background: "#fafafa", borderRadius: 7, padding: 16 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{ticket.event}</div>
-          <div style={{ fontSize: 13, color: "#6b7280" }}>
+        <div style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", borderRadius: 10, padding: "16px 18px" }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#0f172a", marginBottom: 4, letterSpacing: "-0.3px" }}>{ticket.event}</div>
+          <div style={{ fontSize: 13, color: "#94a3b8" }}>
             {ticket.venue}{ticket.venue && (ticket.date || ticket.time) ? " · " : ""}
-            {ticket.date ? ticket.date.replace(/^(\d{4})-(\d{2})-(\d{2})$/, function(_, y, m, d) { return parseInt(d) + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][parseInt(m)-1] + " " + y; }) : ""}
+            {ticket.date ? fmtDate(ticket.date) : ""}
             {ticket.time ? " · " + ticket.time : ""}
           </div>
         </div>
 
         {/* Restrictions banner */}
         {isRestricted && (
-          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14 }}>⚠️</span>
+          <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>Restrictions</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#991b1b" }}>{ticket.restrictions}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>Restriction</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#fca5a5" }}>{ticket.restrictions}</div>
             </div>
           </div>
         )}
 
         {/* Seat info */}
-        {(clean(ticket.section) !== "—" || clean(ticket.row) !== "—" || clean(ticket.seats) !== "—") ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-            {[["Section", clean(ticket.section)], ["Row", clean(ticket.row)], ["Seats", clean(ticket.seats)]].map(function(item) {
-              return (
-                <div key={item[0]} style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 7, padding: "10px 14px", textAlign: "center" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>{item[0]}</div>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: "#111827" }}>{item[1]}</div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 7, padding: "10px 14px", textAlign: "center", gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>Section</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-                {ticket.restrictions ? ticket.restrictions.replace(/Album Pre-Order Pre-Sale\s*-?\s*/i, "").replace(/Ticket$/i, "").trim() : "General Admission"}
-              </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          {[["Section", clean(ticket.section)], ["Row", clean(ticket.row)], ["Seats", clean(ticket.seats)]].map(([label, val]) => (
+            <div key={label} style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", borderRadius: 8, padding: "12px 14px", textAlign: "center" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: "#64748b", textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{val}</div>
             </div>
-          </div>
-        )}
+          ))}
+        </div>
 
         {/* Cost breakdown */}
-        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 7, overflow: "hidden" }}>
-          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "#6b7280", letterSpacing: 1, textTransform: "uppercase" }}>Cost Breakdown</div>
-          <div style={{ padding: 16, display: "grid", gap: 10 }}>
+        <div style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ padding: "10px 16px", borderBottom: "0.5px solid #e2e6ea", fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: 1.2, textTransform: "uppercase" }}>Cost Breakdown</div>
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: "#6b7280" }}>Total paid (USD)</span>
-              <span style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>{fmt(ticket.costPrice)}</span>
+              <span style={{ fontSize: 13, color: "#94a3b8" }}>Total paid (USD)</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#0f172a" }}>{fmt(ticket.costPrice)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: "#6b7280" }}>Quantity</span>
-              <span style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>1 ticket</span>
+              <span style={{ fontSize: 13, color: "#94a3b8" }}>Quantity</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#0f172a" }}>1 ticket</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>Per ticket (USD)</span>
-              <span style={{ fontSize: 18, fontWeight: 700, color: "#f97316" }}>{fmt(costPerTicket)}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: "0.5px solid #e2e6ea" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Per ticket (USD)</span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: "#f97316" }}>{fmt(costPerTicket)}</span>
             </div>
           </div>
         </div>
 
         {/* Currency conversion */}
         {hasConversion && (
-          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, padding: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginBottom: 12 }}>💱 Original Purchase Currency</div>
+          <div style={{ background: "rgba(26,58,110,0.06)", border: "1px solid rgba(46,124,246,0.2)", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#1a3a6e", marginBottom: 12, letterSpacing: 1.2, textTransform: "uppercase" }}>Original Purchase Currency</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
               {[
                 ["Original Amount", fmtCurrency(ticket.originalAmount, ticket.originalCurrency)],
-                ["Exchange Rate", "1 " + ticket.originalCurrency + " = $" + parseFloat(ticket.exchangeRate || 1).toFixed(4)],
+                ["Exchange Rate", `1 ${ticket.originalCurrency} = $${parseFloat(ticket.exchangeRate || 1).toFixed(4)}`],
                 ["Converted USD", fmt(ticket.costPrice)],
-              ].map(function(item) {
-                return (
-                  <div key={item[0]} style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: "#15803d", fontWeight: 600, marginBottom: 3 }}>{item[0]}</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#166534" }}>{item[1]}</div>
-                  </div>
-                );
-              })}
+              ].map(([label, val]) => (
+                <div key={label} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: "#1a3a6e", fontWeight: 600, marginBottom: 4, letterSpacing: "0.5px" }}>{label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8ff" }}>{val}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Order info */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
-          {[["Order Ref", clean(ticket.orderRef)], ["Account", clean((ticket.accountEmail || "").replace(/^".*?"\s*<(.+)>$/, "$1"))], ["Category", ticket.category], ["Added", ticket.addedAt ? new Date(ticket.addedAt).toLocaleDateString("en-GB") : "—"]].map(function(item) {
-            return (
-              <div key={item[0]}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{item[0]}</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", wordBreak: "break-all" }}>{item[1]}</div>
-              </div>
-            );
-          })}
+        {/* Order info grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "#2d3748", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
+          {[
+            ["Order Ref", clean(ticket.orderRef)],
+            ["Account", clean((ticket.accountEmail || "").replace(/^".*?"\s*<(.+)>$/, "$1"))],
+            ["Category", ticket.category],
+            ["Added", ticket.addedAt ? new Date(ticket.addedAt).toLocaleDateString("en-GB") : "—"]
+          ].map(([label, val]) => (
+            <div key={label} style={{ background: "#f7f8fa", padding: "12px 16px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>{label}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#0f172a", wordBreak: "break-all" }}>{val}</div>
+            </div>
+          ))}
         </div>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
+        <div style={{ display: "flex", gap: 10, paddingTop: 2 }}>
           {avail > 0 && <button className="action-btn" onClick={onSell}>💷 Record Sale</button>}
           <button className="ghost-btn" onClick={onEdit}>Edit Ticket</button>
           <button className="ghost-btn" onClick={onClose} style={{ marginLeft: "auto" }}>Close</button>

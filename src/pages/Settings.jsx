@@ -326,29 +326,29 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
   return (
     <div className="fade-up">
       <div style={{ marginBottom: 24 }}>
-        <div style={{ fontFamily: "var(--display)", fontWeight: 900, fontSize: 26, color: "var(--text)" }}>Settings</div>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>INTEGRATIONS & CONFIGURATION</div>
+        <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 500, fontSize: 22, color: "#111827", letterSpacing: "-0.02em" }}>Settings</div>
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, letterSpacing: "0.04em", textTransform: "uppercase" }}>Integrations & Configuration</div>
       </div>
 
       <div style={{ display: "grid", gap: 16, maxWidth: 720 }}>
 
         {/* Accounts */}
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 38, height: 38, background: "#ea4335", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>✉️</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>Email Accounts</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{gmailAccounts.length === 0 ? "No accounts added" : gmailAccounts.length + " account" + (gmailAccounts.length > 1 ? "s" : "") + " connected"}</div>
+              <div style={{ fontWeight: 500, fontSize: 14, color: "#111827" }}>Email Accounts</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{gmailAccounts.length === 0 ? "No accounts added" : gmailAccounts.length + " account" + (gmailAccounts.length > 1 ? "s" : "") + " connected"}</div>
             </div>
           </div>
 
           {/* Tabs */}
-          <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "rgba(255,255,255,0.04)" }}>
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "#fafafa" }}>
             {[["gmail", "📧 Gmail IMAP"], ["aycd", "⚡ AYCD Inbox"]].map(function(t) {
               var active = accountsTab === t[0];
               return (
                 <button key={t[0]} onClick={function() { setAccountsTab(t[0]); }}
-                  style={{ padding: "10px 20px", fontSize: 12, fontWeight: active ? 700 : 500, color: active ? "var(--orange)" : "var(--muted)", background: "none", border: "none", borderBottom: active ? "2px solid var(--orange)" : "2px solid transparent", cursor: "pointer", fontFamily: "var(--body)", marginBottom: -1 }}>
+                  style={{ padding: "10px 20px", fontSize: 12, fontWeight: active ? 700 : 500, color: active ? "var(--orange)" : "var(--muted)", background: "none", border: "none", borderBottom: active ? "2px solid var(--orange)" : "2px solid transparent", cursor: "pointer", fontFamily: "Inter, sans-serif", marginBottom: -1 }}>
                   {t[1]}
                 </button>
               );
@@ -364,8 +364,8 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
                     return (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 24px", borderBottom: i < gmailAccounts.length - 1 ? "1px solid #f1f5f9" : "none" }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{acc.email}</div>
-                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>Added {acc.addedAt ? new Date(acc.addedAt).toLocaleDateString("en-GB") : "—"}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{acc.email}</div>
+                          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Added {acc.addedAt ? new Date(acc.addedAt).toLocaleDateString("en-GB") : "—"}</div>
                         </div>
                         <button className="del-btn" onClick={function() { removeAccount(i); }}>✕</button>
                       </div>
@@ -374,20 +374,20 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
                 </div>
               )}
               <div style={{ padding: 24, display: "grid", gap: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>Add a Gmail Account</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>Add a Gmail Account</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <div>
-                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Gmail Address</label>
-                    <input id="gmail-email-input" type="email" placeholder="you@gmail.com" style={{ background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", color: "var(--text)", fontFamily: "var(--body)", fontSize: 13, padding: "10px 14px", width: "100%", borderRadius: 8, outline: "none" }} />
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>Gmail Address</label>
+                    <input id="gmail-email-input" type="email" placeholder="you@gmail.com" style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "Inter, sans-serif", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
                   </div>
                   <div>
-                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>App Password</label>
-                    <input id="gmail-pass-input" type="password" placeholder="xxxx xxxx xxxx xxxx" style={{ background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", color: "var(--text)", fontFamily: "monospace", fontSize: 13, padding: "10px 14px", width: "100%", borderRadius: 8, outline: "none" }} />
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>App Password</label>
+                    <input id="gmail-pass-input" type="password" placeholder="xxxx xxxx xxxx xxxx" style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "monospace", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
                   </div>
                 </div>
                 <button className="action-btn" style={{ width: "fit-content" }} onClick={addGmailAccount}>+ Add Account</button>
-                <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, fontSize: 12, color: "var(--muted)", lineHeight: 1.9 }}>
-                  <b style={{ color: "var(--text)" }}>How to get a Gmail App Password:</b><br />
+                <div style={{ background: "#fafafa", border: "0.5px solid #e8e8ec", borderRadius: 7, padding: 16, fontSize: 12, color: "#6b7280", lineHeight: 1.9 }}>
+                  <b style={{ color: "#111827" }}>How to get a Gmail App Password:</b><br />
                   Google Account → Security → 2-Step Verification → App Passwords → Create one named "Queud"<br />
                   <a href="https://support.google.com/mail/answer/185833" target="_blank" rel="noreferrer" style={{ color: "var(--orange)", fontWeight: 700, textDecoration: "none" }}>Open Google App Passwords guide →</a>
                 </div>
@@ -401,8 +401,8 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
               <div style={{ display: "flex", gap: 8 }}>
                 <input type="password" value={aycdApiKey} onChange={function(e) { setAycdApiKey(e.target.value); }}
                   placeholder="Paste your AYCD API key"
-                  style={{ flex: 1, background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", borderRadius: 8, padding: "10px 14px", fontFamily: "var(--body)", fontSize: 13, color: "var(--text)", outline: "none" }} />
-                <button onClick={saveAycdKey} style={{ background: "var(--navy)", color: "white", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)" }}>
+                  style={{ flex: 1, background: "#fafafa", border: "0.5px solid #e5e7eb", borderRadius: 7, padding: "8px 10px", fontFamily: "Inter, sans-serif", fontSize: 13, color: "#111827", outline: "none" }} />
+                <button onClick={saveAycdKey} style={{ background: "var(--navy)", color: "white", border: "none", borderRadius: 7, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
                   Save
                 </button>
               </div>
@@ -411,8 +411,8 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
                   ✓ API key saved — AYCD Inbox is ready to use in Email Scraper
                 </div>
               )}
-              <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, fontSize: 12, color: "var(--muted)", lineHeight: 1.9 }}>
-                <b style={{ color: "var(--text)" }}>How to get your AYCD API key:</b><br />
+              <div style={{ background: "#fafafa", border: "0.5px solid #e8e8ec", borderRadius: 7, padding: 16, fontSize: 12, color: "#6b7280", lineHeight: 1.9 }}>
+                <b style={{ color: "#111827" }}>How to get your AYCD API key:</b><br />
                 Open the AYCD Inbox desktop app → Settings → Tasks (API) → copy your key.<br />
                 The Inbox app must be open whenever you fetch emails via AYCD.
               </div>
@@ -421,55 +421,55 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
         </div>
 
         {/* OpenAI */}
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 38, height: 38, background: "#10a37f", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>✨</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>AI Email Parsing</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>Use ChatGPT to extract ticket data from any email</div>
+              <div style={{ fontWeight: 500, fontSize: 14, color: "#111827" }}>AI Email Parsing</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Use ChatGPT to extract ticket data from any email</div>
             </div>
             <div style={{ fontSize: 11, fontWeight: 700, color: settings.openAiKey ? "#16a34a" : "var(--muted)" }}>{settings.openAiKey ? "✓ Active" : "Not configured"}</div>
           </div>
           <div style={{ padding: 24, display: "grid", gap: 14 }}>
             <div>
-              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>OpenAI API Key</label>
-              <input type="password" value={settings.openAiKey || ""} onChange={function(e) { setSettings(function(s) { return Object.assign({}, s, { openAiKey: e.target.value }); }); }} placeholder="sk-..." style={{ background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", color: "var(--text)", fontFamily: "monospace", fontSize: 12, padding: "10px 14px", width: "100%", borderRadius: 8, outline: "none" }} />
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>Saved locally. Never shared except with OpenAI. <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: "var(--orange)", fontWeight: 700, textDecoration: "none" }}>Get your key →</a></div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>OpenAI API Key</label>
+              <input type="password" value={settings.openAiKey || ""} onChange={function(e) { setSettings(function(s) { return Object.assign({}, s, { openAiKey: e.target.value }); }); }} placeholder="sk-..." style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "monospace", fontSize: 12, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>Saved locally. Never shared except with OpenAI. <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: "var(--orange)", fontWeight: 700, textDecoration: "none" }}>Get your key →</a></div>
             </div>
           </div>
         </div>
 
         {/* Email Scraper */}
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 38, height: 38, background: "#4285f4", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📥</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>Email Scraper</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>Search your Gmail inbox and import ticket confirmation emails in bulk</div>
+              <div style={{ fontWeight: 500, fontSize: 14, color: "#111827" }}>Email Scraper</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Search your Gmail inbox and import ticket confirmation emails in bulk</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: serverOnline === true ? "#22c55e" : serverOnline === false ? "#ef4444" : "#d1d5db" }} />
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>{serverOnline === true ? "Server online" : serverOnline === false ? "Server offline" : "Not checked"}</span>
+              <span style={{ fontSize: 11, color: "#6b7280" }}>{serverOnline === true ? "Server online" : serverOnline === false ? "Server offline" : "Not checked"}</span>
               <button className="ghost-btn" style={{ fontSize: 11, padding: "5px 10px" }} onClick={checkServer}>Check</button>
             </div>
           </div>
           <div style={{ padding: 24, display: "grid", gap: 16 }}>
             {serverOnline === false && (
-              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: 14, fontSize: 12, color: "#dc2626" }}>
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: 14, fontSize: 12, color: "#dc2626" }}>
                 Server not running. Open a terminal in your queud-server folder and run: node server.js
               </div>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Gmail Account</label>
-                <select value={bulkSelectedAccount} onChange={function(e) { setBulkSelectedAccount(e.target.value); }} style={{ background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", color: "var(--text)", fontFamily: "var(--body)", fontSize: 13, padding: "10px 14px", width: "100%", borderRadius: 8, outline: "none" }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>Gmail Account</label>
+                <select value={bulkSelectedAccount} onChange={function(e) { setBulkSelectedAccount(e.target.value); }} style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "Inter, sans-serif", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }}>
                   <option value="">Select account…</option>
                   {gmailAccounts.map(function(a) { return <option key={a.email} value={a.email}>{a.email}</option>; })}
                 </select>
               </div>
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Search Subject / Keyword</label>
-                <input value={bulkSearchTerm} onChange={function(e) { setBulkSearchTerm(e.target.value); }} placeholder="e.g. Your booking confirmation" style={{ background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", color: "var(--text)", fontFamily: "var(--body)", fontSize: 13, padding: "10px 14px", width: "100%", borderRadius: 8, outline: "none" }} />
+                <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>Search Subject / Keyword</label>
+                <input value={bulkSearchTerm} onChange={function(e) { setBulkSearchTerm(e.target.value); }} placeholder="e.g. Your booking confirmation" style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "Inter, sans-serif", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
               </div>
             </div>
             <button className="action-btn" style={{ width: "fit-content" }} disabled={bulkFetching || !bulkSelectedAccount} onClick={fetchEmails}>
@@ -479,22 +479,22 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
             {bulkEmails.length > 0 && (
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{bulkEmails.length} emails found</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{bulkEmails.length} emails found</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="ghost-btn" style={{ fontSize: 11 }} onClick={function() { var all = {}; bulkEmails.forEach(function(e) { all[e.uid] = true; }); setBulkSelected(all); }}>Select All</button>
                     <button className="ghost-btn" style={{ fontSize: 11 }} onClick={function() { setBulkSelected({}); }}>Deselect All</button>
                   </div>
                 </div>
-                <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", maxHeight: 300, overflowY: "auto" }}>
+                <div style={{ border: "0.5px solid #e8e8ec", borderRadius: 7, overflow: "hidden", maxHeight: 300, overflowY: "auto" }}>
                   {bulkEmails.map(function(email, i) {
                     return (
-                      <div key={email.uid} onClick={function() { setBulkSelected(function(s) { var n = Object.assign({}, s); n[email.uid] = !n[email.uid]; return n; }); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: i < bulkEmails.length - 1 ? "1px solid #f1f5f9" : "none", cursor: "pointer", background: bulkSelected[email.uid] ? "#f0fdf4" : "white" }}>
+                      <div key={email.uid} onClick={function() { setBulkSelected(function(s) { var n = Object.assign({}, s); n[email.uid] = !n[email.uid]; return n; }); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderBottom: i < bulkEmails.length - 1 ? "1px solid #f1f5f9" : "none", cursor: "pointer", background: bulkSelected[email.uid] ? "#f0fdf4" : "white" }}>
                         <div style={{ width: 18, height: 18, borderRadius: 4, border: "2px solid " + (bulkSelected[email.uid] ? "var(--orange)" : "#d1d5db"), background: bulkSelected[email.uid] ? "var(--orange)" : "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          {bulkSelected[email.uid] && <span style={{ color: "white", fontSize: 11, fontWeight: 900 }}>✓</span>}
+                          {bulkSelected[email.uid] && <span style={{ color: "white", fontSize: 11, fontWeight: 700 }}>✓</span>}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.subject || "(no subject)"}</div>
-                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{email.from} · {email.date ? new Date(email.date).toLocaleDateString("en-GB") : "—"}</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.subject || "(no subject)"}</div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{email.from} · {email.date ? new Date(email.date).toLocaleDateString("en-GB") : "—"}</div>
                         </div>
                       </div>
                     );
@@ -506,24 +506,24 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
                     var isDone = !bulkParsing && bulkParsed.length > 0 && bulkParsed.length >= numSel && numSel > 0;
                     return (
                       <button disabled={bulkParsing || numSel === 0} onClick={parseSelected}
-                        style={{ background: isDone ? "var(--navy)" : "var(--orange)", color: "white", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: numSel === 0 ? "not-allowed" : "pointer", fontFamily: "var(--body)", transition: "background 0.3s", display: "inline-flex", alignItems: "center", gap: 6, opacity: numSel === 0 ? 0.5 : 1 }}>
+                        style={{ background: isDone ? "var(--navy)" : "var(--orange)", color: "white", border: "none", borderRadius: 7, padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: numSel === 0 ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif", transition: "background 0.3s", display: "inline-flex", alignItems: "center", gap: 6, opacity: numSel === 0 ? 0.5 : 1 }}>
                         {bulkParsing ? "⏳ Parsing " + parseProgress.done + " / " + parseProgress.total + "…" : isDone ? "✅ Parsed " + bulkParsed.length + " — Parse Again" : "✨ Parse " + numSel + " Selected"}
                       </button>
                     );
                   })()}
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>{Object.values(bulkSelected).filter(Boolean).length} of {bulkEmails.length} selected</span>
+                  <span style={{ fontSize: 11, color: "#6b7280" }}>{Object.values(bulkSelected).filter(Boolean).length} of {bulkEmails.length} selected</span>
                 </div>
                 {bulkParsed.length > 0 && (
                   <div style={{ marginTop: 16 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 10 }}>{bulkParsed.length} ready to import</div>
-                    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", maxHeight: 280, overflowY: "auto" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 10 }}>{bulkParsed.length} ready to import</div>
+                    <div style={{ border: "0.5px solid #e8e8ec", borderRadius: 7, overflow: "hidden", maxHeight: 280, overflowY: "auto" }}>
                       {bulkParsed.map(function(p, i) {
                         var missingPrice = !p.costPrice || p.costPrice === 0;
                         return (
-                          <div key={p._uid} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: i < bulkParsed.length - 1 ? "1px solid #f1f5f9" : "none", background: missingPrice ? "#fffbeb" : "white" }}>
+                          <div key={p._uid} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderBottom: i < bulkParsed.length - 1 ? "1px solid #f1f5f9" : "none", background: missingPrice ? "#fffbeb" : "white" }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{p.event || p._subject || "Unknown"}</div>
-                              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{p.event || p._subject || "Unknown"}</div>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
                                 {p.date ? "📅 " + p.date + "  " : ""}
                                 {p.venue ? "📍 " + p.venue + "  " : ""}
                                 {p.section ? "§" + p.section + "  " : ""}
@@ -537,9 +537,9 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
                         );
                       })}
                     </div>
-                    <button onClick={importAll} style={{ marginTop: 12, background: "#16a34a", color: "white", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)", display: "inline-flex", alignItems: "center", gap: 6 }}>⬆ Import {bulkParsed.length} to Inventory</button>
+                    <button onClick={importAll} style={{ marginTop: 12, background: "#16a34a", color: "white", border: "none", borderRadius: 7, padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Inter, sans-serif", display: "inline-flex", alignItems: "center", gap: 6 }}>⬆ Import {bulkParsed.length} to Inventory</button>
                     {bulkParsed.filter(function(p) { return !p.costPrice || p.costPrice === 0; }).length > 0 && (
-                      <div style={{ marginTop: 8, fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px" }}>
+                      <div style={{ marginTop: 8, fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 7, padding: "8px 12px" }}>
                         ⚠ {bulkParsed.filter(function(p) { return !p.costPrice || p.costPrice === 0; }).length} tickets have no price — edit after importing.
                       </div>
                     )}
@@ -548,23 +548,23 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
               </div>
             )}
 
-            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: 14, fontSize: 12, color: "#1e40af", lineHeight: 1.8 }}>
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7, padding: 14, fontSize: 12, color: "#1e40af", lineHeight: 1.8 }}>
               Requires local server running. In your queud-server folder run: <b>npm install</b> then <b>node server.js</b>
             </div>
           </div>
         </div>
 
         {/* Manual Email Paste */}
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 38, height: 38, background: "#34a853", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📋</div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>Manual Email Paste</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>Paste anything — subject line, full email, or any snippet</div>
+              <div style={{ fontWeight: 500, fontSize: 14, color: "#111827" }}>Manual Email Paste</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Paste anything — subject line, full email, or any snippet</div>
             </div>
           </div>
           <div style={{ padding: 24, display: "grid", gap: 14 }}>
-            <textarea value={emailText} onChange={function(e) { setEmailText(e.target.value); setParsed(null); }} placeholder={"Paste anything here:\n• Just the subject: \"You Got Tickets To Oasis\"\n• Full confirmation email\n• Any order summary"} style={{ background: "rgba(255,255,255,0.04)", border: "2px solid #e2e8f0", color: "var(--text)", fontFamily: "var(--body)", fontSize: 12, padding: 16, width: "100%", height: 140, resize: "vertical", borderRadius: 10, outline: "none", lineHeight: 1.8 }} />
+            <textarea value={emailText} onChange={function(e) { setEmailText(e.target.value); setParsed(null); }} placeholder={"Paste anything here:\n• Just the subject: \"You Got Tickets To Oasis\"\n• Full confirmation email\n• Any order summary"} style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "Inter, sans-serif", fontSize: 12, padding: 16, width: "100%", height: 140, resize: "vertical", borderRadius: 7, outline: "none", lineHeight: 1.8 }} />
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <button className="action-btn" onClick={parseWithAI}>
                 {aiParsing ? "⏳ AI Parsing…" : settings.openAiKey ? "✨ Parse with AI" : "Parse Email"}
@@ -572,12 +572,12 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
               <button className="ghost-btn" onClick={function() { setEmailText(""); setParsed(null); }}>Clear</button>
             </div>
             {parsed && (
-              <div style={{ background: "#f0fdf4", border: "2px solid #bbf7d0", padding: 18, borderRadius: 10 }}>
+              <div style={{ background: "#f0fdf4", border: "2px solid #bbf7d0", padding: 18, borderRadius: 7 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
                   {[["Event", parsed.event || "Not detected"], ["Date", parsed.date || "—"], ["Venue", parsed.venue || "—"], ["Section", parsed.section || "—"], ["Row", parsed.row || "—"], ["Seats", parsed.seats || "—"], ["Qty", parsed.qty || "—"], ["Cost", parsed.costPrice > 0 ? fmt(parsed.costPrice) : "—"]].map(function(item) {
                     return (
-                      <div key={item[0]} style={{ background: "var(--card)", padding: "8px 12px", borderRadius: 7, border: "1px solid var(--border)" }}>
-                        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: "var(--muted)", textTransform: "uppercase", marginBottom: 2 }}>{item[0]}</div>
+                      <div key={item[0]} style={{ background: "white", padding: "8px 12px", borderRadius: 7, border: "0.5px solid #e8e8ec" }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: "#6b7280", textTransform: "uppercase", marginBottom: 2 }}>{item[0]}</div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: item[1] === "Not detected" || item[1] === "—" ? "var(--muted)" : "var(--navy)" }}>{item[1]}</div>
                       </div>
                     );
@@ -590,12 +590,12 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
         </div>
 
         {/* Data Management */}
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 38, height: 38, background: "#6366f1", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🗄️</div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>Data Management</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{tickets.length} events · {sales.length} sales stored locally</div>
+              <div style={{ fontWeight: 500, fontSize: 14, color: "#111827" }}>Data Management</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{tickets.length} events · {sales.length} sales stored locally</div>
             </div>
           </div>
           <div style={{ padding: 24, display: "flex", gap: 10, flexWrap: "wrap" }}>
