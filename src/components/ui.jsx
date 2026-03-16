@@ -72,45 +72,142 @@ export function StatCard({ label, value, sub, accent, icon }) {
   );
 }
 
-export function Sidebar({ view, setView }) {
-  const NavItem = ({ id, label, icon }) => (
-    <button onClick={() => setView(id)} style={{
-      display: "flex", alignItems: "center", gap: 10, width: "100%",
-      padding: "9px 12px", borderRadius: 8,
-      background: view === id ? "rgba(255,255,255,0.14)" : "transparent",
-      border: "none",
-      borderLeft: view === id ? "3px solid #f97316" : "3px solid transparent",
-      cursor: "pointer", fontFamily: "var(--body)", fontSize: 13,
-      fontWeight: view === id ? 600 : 400,
-      color: view === id ? "#ffffff" : "rgba(255,255,255,0.45)",
-      transition: "all 0.15s", textAlign: "left", letterSpacing: "-0.1px",
-      borderRadius: view === id ? "0 8px 8px 0" : "0 8px 8px 0",
-    }}
-    onMouseEnter={e => { if (view !== id) { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}}
-    onMouseLeave={e => { if (view !== id) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}}>
-      <span style={{ fontSize: 15, opacity: view === id ? 1 : 0.5 }}>{icon}</span>
-      {label}
-    </button>
+// ── SVG Icon set ─────────────────────────────────────────────────────────────
+export const Icons = {
+  dashboard: (color = "currentColor") => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <rect x="1" y="1" width="6" height="6" rx="1.5" fill={color}/>
+      <rect x="9" y="1" width="6" height="6" rx="1.5" fill={color}/>
+      <rect x="1" y="9" width="6" height="6" rx="1.5" fill={color}/>
+      <rect x="9" y="9" width="6" height="6" rx="1.5" fill={color}/>
+    </svg>
+  ),
+  inventory: (color = "currentColor") => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="3.5" width="13" height="10" rx="1.5" stroke={color} strokeWidth="1.4"/>
+      <path d="M5 3.5V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5v1" stroke={color} strokeWidth="1.4"/>
+      <path d="M4 8.5h8M4 11.5h5" stroke={color} strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
+  sales: (color = "currentColor") => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <path d="M2 12.5l3.5-4 2.5 2.5L12 4.5" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M10 4.5h2v2" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  settings: (color = "currentColor") => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="2.5" stroke={color} strokeWidth="1.4"/>
+      <path d="M8 1.5v1.2M8 13.3v1.2M14.5 8h-1.2M2.7 8H1.5M12.6 3.4l-.85.85M4.25 11.75l-.85.85M12.6 12.6l-.85-.85M4.25 4.25l-.85-.85" stroke={color} strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  ),
+  // KPI card icons (13px)
+  kpi_invested: (color = "currentColor") => (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="6" stroke={color} strokeWidth="1.5"/>
+      <path d="M8 5.5v2.8l1.8 1.8" stroke={color} strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  ),
+  kpi_revenue: (color = "currentColor") => (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <path d="M2 12l3.5-3.5 2.5 2.5L12 5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  kpi_profit: (color = "currentColor") => (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <path d="M8 2v12M5 5.5C5 4.1 6.3 3 8 3s3 1.1 3 2.5-1.3 2.3-3 2.5c-1.7.2-3 1.1-3 2.5S6.3 13 8 13s3-1.1 3-2.5" stroke={color} strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  ),
+  kpi_roi: (color = "currentColor") => (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <path d="M2 13l4-8 3 4 3-6 2 3" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  kpi_stock: (color = "currentColor") => (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <rect x="2" y="4.5" width="12" height="8.5" rx="1.5" stroke={color} strokeWidth="1.4"/>
+      <path d="M5.5 4.5V3.5A1.5 1.5 0 017 2h2a1.5 1.5 0 011.5 1.5v1" stroke={color} strokeWidth="1.4"/>
+      <path d="M5 9h6M5 11.5h4" stroke={color} strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  ),
+  kpi_sold: (color = "currentColor") => (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <path d="M3 8.5l3.5 3.5L13 4.5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+};
+
+// KPI card with icon in top-right
+export function KpiCard({ label, value, color, sub, iconKey }) {
+  const iconFn = Icons[iconKey];
+  return (
+    <div style={{ background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: color, borderRadius: "12px 12px 0 0" }} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>{label}</div>
+        {iconFn && (
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: `${color}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            {iconFn(color)}
+          </div>
+        )}
+      </div>
+      <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 20, color, lineHeight: 1, letterSpacing: "-0.5px", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 5 }}>{sub}</div>}
+    </div>
   );
+}
+
+// ── Sidebar ──────────────────────────────────────────────────────────────────
+export function Sidebar({ view, setView }) {
+  const navItems = [
+    { id: "dashboard", label: "Dashboard", iconFn: Icons.dashboard },
+    { id: "inventory", label: "Inventory", iconFn: Icons.inventory },
+    { id: "sales",     label: "Sales",     iconFn: Icons.sales },
+    { id: "settings",  label: "Settings",  iconFn: Icons.settings },
+  ];
+
+  const NavItem = ({ id, label, iconFn }) => {
+    const active = view === id;
+    const iconColor = active ? "#ffffff" : "rgba(255,255,255,0.45)";
+    return (
+      <button onClick={() => setView(id)} style={{
+        display: "flex", alignItems: "center", gap: 10, width: "100%",
+        padding: "9px 12px",
+        background: active ? "rgba(255,255,255,0.14)" : "transparent",
+        border: "none",
+        borderLeft: active ? "3px solid #f97316" : "3px solid transparent",
+        borderRadius: "0 8px 8px 0",
+        cursor: "pointer", fontFamily: "var(--body)", fontSize: 13,
+        fontWeight: active ? 600 : 400,
+        color: active ? "#ffffff" : "rgba(255,255,255,0.45)",
+        transition: "all 0.15s", textAlign: "left", letterSpacing: "-0.1px",
+      }}
+      onMouseEnter={e => { if (!active) { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}}
+      onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}}>
+        <span style={{ display: "flex", alignItems: "center", flexShrink: 0, color: iconColor }}>
+          {iconFn(iconColor)}
+        </span>
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div style={{ width: 220, background: "#1a3a6e", display: "flex", flexDirection: "column", paddingBottom: 24, flexShrink: 0 }}>
-      <div style={{ padding: "24px 16px 22px", borderBottom: "1px solid rgba(255,255,255,0.1)", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <img src="/logo.png" alt="Queud" style={{ width: 24, height: 24, objectFit: "contain" }} />
-        </div>
+      {/* Logo — no container box, just logo + wordmark */}
+      <div style={{ padding: "22px 18px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+        <img src="/logo.png" alt="Queud" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} />
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#ffffff", letterSpacing: "-0.4px", fontFamily: "var(--body)" }}>Queud</div>
-          <div style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", letterSpacing: "1.5px", fontWeight: 700, textTransform: "uppercase" }}>Beta</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#ffffff", letterSpacing: "-0.5px", fontFamily: "var(--body)", lineHeight: 1 }}>Queud</div>
+          <div style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", letterSpacing: "1.5px", fontWeight: 700, textTransform: "uppercase", marginTop: 2 }}>Beta</div>
         </div>
       </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, paddingLeft: 6, paddingRight: 10 }}>
-        <NavItem id="dashboard" label="Dashboard" icon="▦" />
-        <NavItem id="inventory" label="Inventory" icon="🎟" />
-        <NavItem id="sales" label="Sales" icon="💷" />
-        <NavItem id="settings" label="Settings" icon="⚙️" />
+        {navItems.map(item => <NavItem key={item.id} {...item} />)}
       </div>
-      <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 14, display: "flex", alignItems: "center", gap: 6, paddingLeft: 16 }}>
+
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 14, display: "flex", alignItems: "center", gap: 6, paddingLeft: 16 }}>
         <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
         <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: "0.3px" }}>Supabase connected</span>
       </div>

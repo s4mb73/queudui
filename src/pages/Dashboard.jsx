@@ -1,4 +1,5 @@
 import { fmt, fmtPct } from "../utils/format";
+import { KpiCard } from "../components/ui";
 
 export default function Dashboard({ tickets, sales, setView, setShowAddTicket, setEditingTicket, setTf, blankTicket }) {
   const totalInvested = tickets.reduce((a, t) => a + (t.costPrice || 0), 0);
@@ -25,12 +26,12 @@ export default function Dashboard({ tickets, sales, setView, setShowAddTicket, s
   });
 
   const kpis = [
-    { label: "Total Invested", value: fmt(totalInvested), color: "#1a3a6e" },
-    { label: "Total Revenue",  value: fmt(totalRevenue),  color: "#f97316" },
-    { label: "Net Profit",     value: fmt(totalProfit),   color: totalProfit >= 0 ? "#059669" : "#ef4444" },
-    { label: "Overall ROI",    value: fmtPct(roi),        color: roi >= 0 ? "#059669" : "#ef4444" },
-    { label: "In Stock",       value: stockCount,         color: "#f97316", sub: tickets.length + " events" },
-    { label: "Total Sold",     value: soldCount,          color: "#7c3aed", sub: sales.length + " transactions" },
+    { label: "Total Invested", value: fmt(totalInvested), color: "#1a3a6e", iconKey: "kpi_invested" },
+    { label: "Total Revenue",  value: fmt(totalRevenue),  color: "#f97316", iconKey: "kpi_revenue" },
+    { label: "Net Profit",     value: fmt(totalProfit),   color: totalProfit >= 0 ? "#059669" : "#ef4444", iconKey: "kpi_profit" },
+    { label: "Overall ROI",    value: fmtPct(roi),        color: roi >= 0 ? "#059669" : "#ef4444", iconKey: "kpi_roi" },
+    { label: "In Stock",       value: stockCount,         color: "#f97316", sub: tickets.length + " events", iconKey: "kpi_stock" },
+    { label: "Total Sold",     value: soldCount,          color: "#7c3aed", sub: sales.length + " transactions", iconKey: "kpi_sold" },
   ];
 
   const card = { background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" };
@@ -45,15 +46,9 @@ export default function Dashboard({ tickets, sales, setView, setShowAddTicket, s
         <button className="action-btn" onClick={() => { setEditingTicket(null); setTf(blankTicket); setShowAddTicket(true); }}>+ Add Tickets</button>
       </div>
 
+      {/* KPI grid — now using KpiCard with icons */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 18 }}>
-        {kpis.map(k => (
-          <div key={k.label} style={{ ...card, padding: "14px 16px", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: k.color, borderRadius: "12px 12px 0 0" }} />
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8", marginBottom: 8 }}>{k.label}</div>
-            <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 20, color: k.color, lineHeight: 1, letterSpacing: "-0.5px" }}>{k.value}</div>
-            {k.sub && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 5 }}>{k.sub}</div>}
-          </div>
-        ))}
+        {kpis.map(k => <KpiCard key={k.label} {...k} />)}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -107,6 +102,7 @@ export default function Dashboard({ tickets, sales, setView, setShowAddTicket, s
         </div>
       </div>
 
+      {/* Current Stock */}
       <div style={{ ...card, overflow: "hidden" }}>
         <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
@@ -128,7 +124,7 @@ export default function Dashboard({ tickets, sales, setView, setShowAddTicket, s
                 return d;
               };
               return (
-                <div key={key} style={{ padding: "13px 18px", borderRight: "0.5px solid #f1f4f8", borderBottom: "0.5px solid #f1f4f8", display: "flex", alignItems: "center", gap: 12 }}>
+                <div key={key} style={{ padding: "13px 18px", borderRight: "0.5px solid #f1f4f8", borderBottom: "0.5px solid #f1f4f8", display: "flex", alignItems: "center", gap: 12, borderLeft: `3px solid ${group.category === "Sport" ? "#1a3a6e" : "#7c3aed"}` }}>
                   <div style={{ width: 36, height: 36, borderRadius: 9, background: group.category === "Sport" ? "rgba(26,58,110,0.08)" : "rgba(124,58,237,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
                     {group.category === "Sport" ? "⚽" : "🎵"}
                   </div>

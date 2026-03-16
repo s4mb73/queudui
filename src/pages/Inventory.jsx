@@ -119,6 +119,9 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
 
   const card = { background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" };
 
+  // Accent colour per category
+  const eventAccent = (cat) => cat === "Sport" ? "#1a3a6e" : "#7c3aed";
+
   return (
     <div className="fade-up">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
@@ -129,27 +132,28 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
         <button className="action-btn" onClick={() => { setEditingTicket(null); setTf(blankTicket); setShowAddTicket(true); }}>+ Add Ticket</button>
       </div>
 
+      {/* Filter bar — tighter pills */}
       <div style={{ background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         <div style={{ position: "relative", flex: "1 1 220px", maxWidth: 280 }}>
           <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search events, order refs, seats…"
-            style={{ background: "#f7f8fa", border: "1px solid #e2e6ea", padding: "7px 12px 7px 30px", borderRadius: 7, fontFamily: "var(--body)", fontSize: 12, width: "100%", outline: "none", color: "#0f172a" }} />
+            style={{ background: "#f7f8fa", border: "1px solid #e2e6ea", padding: "6px 12px 6px 30px", borderRadius: 7, fontFamily: "var(--body)", fontSize: 12, width: "100%", outline: "none", color: "#0f172a" }} />
           <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#94a3b8" }}>🔍</span>
         </div>
-        <div style={{ display: "flex", gap: 5 }}>
+        <div style={{ display: "flex", gap: 4 }}>
           {["All","Sport","Concert"].map(c => (
             <button key={c} onClick={() => setFilterCat(c)}
-              style={{ padding: "5px 12px", borderRadius: 7, border: `1px solid ${filterCat === c ? "#1a3a6e" : "#e2e6ea"}`, background: filterCat === c ? "#1a3a6e" : "transparent", color: filterCat === c ? "#ffffff" : "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)", transition: "all 0.15s" }}>
+              style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${filterCat === c ? "#1a3a6e" : "#e2e6ea"}`, background: filterCat === c ? "#1a3a6e" : "transparent", color: filterCat === c ? "#ffffff" : "#64748b", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)", transition: "all 0.15s" }}>
               {c}
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 5 }}>
+        <div style={{ display: "flex", gap: 4 }}>
           {["All",...STATUSES].map(s => {
             const style = s !== "All" ? STATUS_STYLES[s] : null;
             const active = filterStatus === s;
             return (
               <button key={s} onClick={() => setFilterStatus(s)}
-                style={{ padding: "5px 10px", borderRadius: 7, border: `1px solid ${active ? (style?.dot || "#1a3a6e") : "#e2e6ea"}`, background: active ? (style?.bg || "#1a3a6e") : "transparent", color: active ? (style?.text || "#ffffff") : "#64748b", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)", display: "flex", alignItems: "center", gap: 4, transition: "all 0.15s" }}>
+                style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${active ? (style?.dot || "#1a3a6e") : "#e2e6ea"}`, background: active ? (style?.bg || "rgba(26,58,110,0.1)") : "transparent", color: active ? (style?.text || "#1a3a6e") : "#64748b", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)", display: "flex", alignItems: "center", gap: 4, transition: "all 0.15s" }}>
                 {style && <div style={{ width: 5, height: 5, borderRadius: "50%", background: style.dot }} />}{s}
               </button>
             );
@@ -169,7 +173,8 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
       )}
 
       <div style={{ ...card, overflow: "hidden" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 18px", borderBottom: "0.5px solid #e2e6ea", background: "#f7f8fa" }}>
+        {/* Table header — no bg fill, just a bottom border */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 18px", borderBottom: "1px solid #e2e6ea" }}>
           <div style={{ width: 15, flexShrink: 0 }} />
           <div style={{ width: 34, flexShrink: 0 }} />
           <div style={{ flex: 1, fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>Event</div>
@@ -200,12 +205,14 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
           const seatSummary = sections.slice(0, 3).map(s => `Sec ${s}`).join(" · ") + (sections.length > 3 ? ` +${sections.length - 3} more` : "");
           const someSelected = eventTickets.some(t => multiSelected[t.id]);
           const allEvSelected = eventTickets.every(t => multiSelected[t.id]);
+          const accent = eventAccent(eventGroup.category);
 
           return (
             <div key={eKey} style={{ borderBottom: gi < Object.keys(eventGroups).length - 1 ? "0.5px solid #e2e6ea" : "none" }}>
+              {/* Event row — left accent border by category */}
               <div onClick={() => setExpandedEvents(s => ({ ...s, [eKey]: !s[eKey] }))}
                 className="hover-row"
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", cursor: "pointer", background: someSelected ? "rgba(249,115,22,0.04)" : "#ffffff" }}>
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", cursor: "pointer", background: someSelected ? "rgba(249,115,22,0.04)" : "#ffffff", borderLeft: `3px solid ${accent}` }}>
 
                 <div onClick={e => { e.stopPropagation(); toggleAllInEvent(eventTickets); }}
                   style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px solid ${allEvSelected ? "#1a3a6e" : someSelected ? "#1a3a6e" : "#d1d9e0"}`, background: allEvSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -242,34 +249,44 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                 const seatRange = seatNums.length > 1 ? `Seats ${seatNums[0]}–${seatNums[seatNums.length-1]}` : seatNums.length === 1 ? `Seat ${seatNums[0]}` : "";
                 const seatLabel = [orderGroup.section && `Sec ${orderGroup.section}`, orderGroup.row && `Row ${orderGroup.row}`, seatRange].filter(Boolean).join(" · ");
                 const hasRestriction = orderTickets.some(t => t.restrictions && /restrict/i.test(t.restrictions));
+                const restriction = orderTickets.find(t => t.restrictions)?.restrictions;
+                const isRestricted = restriction && /restrict/i.test(restriction);
 
                 return (
-                  <div key={oKey} style={{ borderTop: "0.5px solid #f1f4f8" }}>
+                  <div key={oKey} style={{ borderTop: "0.5px solid #edf0f3" }}>
+                    {/* ── Order row ── */}
                     <div onClick={() => setExpandedOrders(s => ({ ...s, [eKey+"||"+oKey]: !s[eKey+"||"+oKey] }))}
                       className="hover-row"
-                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 18px 9px 44px", cursor: "pointer", background: someOrdSelected ? "rgba(249,115,22,0.04)" : hasRestriction ? "#fff8f8" : "#fafbfc", borderLeft: hasRestriction ? "3px solid #fca5a5" : "3px solid transparent" }}>
+                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px 10px 52px", cursor: "pointer", background: someOrdSelected ? "rgba(249,115,22,0.03)" : "#f7f8fa", borderLeft: hasRestriction ? "3px solid #fca5a5" : "3px solid transparent" }}>
 
+                      {/* Checkbox */}
                       <div onClick={e => { e.stopPropagation(); const u = {}; orderTickets.forEach(t => { u[t.id] = !allOrdSelected; }); setMultiSelected(s => ({ ...s, ...u })); }}
                         style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${allOrdSelected ? "#1a3a6e" : someOrdSelected ? "#1a3a6e" : "#d1d9e0"}`, background: allOrdSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                         {allOrdSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
                         {!allOrdSelected && someOrdSelected && <span style={{ color: "#1a3a6e", fontSize: 8, fontWeight: 700 }}>—</span>}
                       </div>
 
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", display: "flex", alignItems: "center", gap: 8 }}>
-                          {seatLabel || "Order"}
-                          {orderGroup.orderRef && <span style={{ fontSize: 12, color: "#64748b", fontWeight: 400 }}>#{orderGroup.orderRef}</span>}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                          {orderGroup.accountEmail}
-                          {(() => {
-                            const restriction = orderTickets.find(t => t.restrictions)?.restrictions;
-                            if (!restriction) return null;
-                            const isRestricted = /restrict/i.test(restriction);
-                            return <span style={{ marginLeft: 6, color: isRestricted ? "#ef4444" : "#64748b", fontWeight: isRestricted ? 600 : 400 }}>{isRestricted ? "⚠ " : ""}{restriction}</span>;
-                          })()}
-                        </div>
+                      {/* Seat location chips */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, flexWrap: "wrap" }}>
+                        {orderGroup.section && (
+                          <span style={{ background: "#eef2ff", color: "#1a3a6e", border: "1px solid #c7d2fe", borderRadius: 5, padding: "2px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>Sec {orderGroup.section}</span>
+                        )}
+                        {orderGroup.row && (
+                          <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 5, padding: "2px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>Row {orderGroup.row}</span>
+                        )}
+                        {seatRange && (
+                          <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 5, padding: "2px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{seatRange}</span>
+                        )}
+                        {orderGroup.orderRef && (
+                          <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginLeft: 2 }}>#{orderGroup.orderRef}</span>
+                        )}
+                        {isRestricted && (
+                          <span style={{ background: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca", borderRadius: 5, padding: "2px 8px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>⚠ {restriction}</span>
+                        )}
                       </div>
+
+                      {/* Account email — muted */}
+                      <div style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{orderGroup.accountEmail}</div>
 
                       <div style={{ display: "flex", gap: 5, alignItems: "center", width: 70, flexShrink: 0 }}>{qtyBox(oQty)}{soldBox(oSold)}</div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", width: 80, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(oCost)}</div>
@@ -277,62 +294,79 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                       <div style={{ fontSize: 12, color: "#94a3b8", width: 16, flexShrink: 0 }}>{isOrderExpanded ? "⌄" : "›"}</div>
                     </div>
 
-                    {isOrderExpanded && orderTickets.map(t => {
-                      const isSelected = !!multiSelected[t.id];
-                      const isRestricted = t.restrictions && /restrict/i.test(t.restrictions);
-                      const s = t.status || "Unsold";
-                      const sStyle = STATUS_STYLES[s];
+                    {/* ── Seat rows ── */}
+                    {isOrderExpanded && (
+                      <div style={{ background: "#f7f8fa", borderTop: "0.5px solid #edf0f3" }}>
+                        {orderTickets.map((t, ti) => {
+                          const isSelected = !!multiSelected[t.id];
+                          const tRestricted = t.restrictions && /restrict/i.test(t.restrictions);
+                          const s = t.status || "Unsold";
+                          const sStyle = STATUS_STYLES[s];
+                          const seatLabel = t.seats ? `Seat ${t.seats}` : (t.restrictions?.replace(/Album Pre-Order Pre-Sale\s*-?\s*/i, "").replace(/Ticket$/i, "").trim() || "No seat");
 
-                      return (
-                        <div key={t.id} className="hover-row"
-                          style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 18px 8px 64px", borderTop: "0.5px solid #f1f4f8", background: isSelected ? "rgba(26,58,110,0.04)" : isRestricted ? "#fff8f8" : "#f7f8fa", cursor: "pointer", borderLeft: isRestricted ? "3px solid #fca5a5" : "3px solid transparent" }}
-                          onClick={() => setSelectedTicket(t)}>
+                          return (
+                            <div key={t.id} className="hover-row"
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 18px 8px 80px", borderTop: ti > 0 ? "0.5px solid #edf0f3" : "none", background: isSelected ? "rgba(26,58,110,0.05)" : tRestricted ? "#fff8f8" : "transparent", cursor: "pointer" }}
+                              onClick={() => setSelectedTicket(t)}>
 
-                          <div onClick={e => toggleSelect(t.id, e)}
-                            style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d9e0"}`, background: isSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                            {isSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
-                          </div>
-
-                          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                            <div style={{ background: "#ffffff", border: "1px solid #e2e6ea", borderRadius: 5, padding: "3px 10px", fontSize: 12, fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
-                              {t.seats ? `Seat ${t.seats}` : (t.restrictions ? t.restrictions.replace(/Album Pre-Order Pre-Sale\s*-?\s*/i, "").replace(/Ticket$/i, "").trim() : "No seat")}
-                            </div>
-                            {isRestricted && <span style={{ fontSize: 12, color: "#ef4444", fontWeight: 600 }}>⚠ {t.restrictions}</span>}
-                            {t.restrictions && !isRestricted && <span style={{ fontSize: 12, color: "#64748b" }}>{t.restrictions}</span>}
-                          </div>
-
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", width: 70, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(t.costPrice)}</div>
-
-                          <div style={{ position: "relative", width: 80, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                            <div onClick={() => setOpenStatusMenu(openStatusMenu === t.id ? null : t.id)}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 4, background: sStyle.bg, color: sStyle.text, borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
-                              <div style={{ width: 5, height: 5, borderRadius: "50%", background: sStyle.dot }} />{s} ▾
-                            </div>
-                            {openStatusMenu === t.id && (
-                              <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, minWidth: 140, overflow: "hidden" }}>
-                                {STATUSES.map(st => (
-                                  <div key={st} onClick={e => updateStatus(t.id, st, e)}
-                                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", background: t.status === st ? "#f7f8fa" : "transparent", fontWeight: t.status === st ? 700 : 400, fontSize: 12, color: STATUS_STYLES[st].text, transition: "background 0.1s" }}
-                                    onMouseEnter={e => e.currentTarget.style.background = "#f7f8fa"}
-                                    onMouseLeave={e => e.currentTarget.style.background = t.status === st ? "#f7f8fa" : "transparent"}>
-                                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_STYLES[st].dot }} />{st}
-                                    {t.status === st && <span style={{ marginLeft: "auto", fontSize: 10, color: "#1a3a6e" }}>✓</span>}
-                                  </div>
-                                ))}
+                              {/* Checkbox */}
+                              <div onClick={e => toggleSelect(t.id, e)}
+                                style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d9e0"}`, background: isSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                {isSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
                               </div>
-                            )}
-                          </div>
 
-                          <div style={{ display: "flex", gap: 4 }} onClick={e => e.stopPropagation()}>
-                            {(t.qtyAvailable ?? t.qty) > 0 && (
-                              <button onClick={() => openSale(t.id)} style={{ background: "rgba(249,115,22,0.1)", color: "#f97316", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)" }}>Sell</button>
-                            )}
-                            <button onClick={() => openEdit(t)} style={{ background: "#f7f8fa", color: "#64748b", border: "1px solid #e2e6ea", borderRadius: 6, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontFamily: "var(--body)" }}>Edit</button>
-                            <button onClick={() => delTicket(t.id)} style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 6, padding: "3px 7px", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)" }}>✕</button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                              {/* Seat number badge */}
+                              <div style={{ background: "#ffffff", border: "1px solid #e2e6ea", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 700, color: "#0f172a", whiteSpace: "nowrap", minWidth: 72, textAlign: "center" }}>
+                                {seatLabel}
+                              </div>
+
+                              {/* Restriction tag if present */}
+                              {tRestricted && (
+                                <span style={{ background: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca", borderRadius: 5, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>⚠ {t.restrictions}</span>
+                              )}
+                              {t.restrictions && !tRestricted && (
+                                <span style={{ background: "#f1f5f9", color: "#64748b", border: "1px solid #e2e6ea", borderRadius: 5, padding: "2px 8px", fontSize: 11 }}>{t.restrictions}</span>
+                              )}
+
+                              <div style={{ flex: 1 }} />
+
+                              {/* Cost per ticket */}
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", width: 70, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(t.costPrice)}</div>
+
+                              {/* Status pill — clickable */}
+                              <div style={{ position: "relative", width: 80, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                                <div onClick={() => setOpenStatusMenu(openStatusMenu === t.id ? null : t.id)}
+                                  style={{ display: "inline-flex", alignItems: "center", gap: 4, background: sStyle.bg, color: sStyle.text, borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: sStyle.dot }} />{s} ▾
+                                </div>
+                                {openStatusMenu === t.id && (
+                                  <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, minWidth: 140, overflow: "hidden" }}>
+                                    {STATUSES.map(st => (
+                                      <div key={st} onClick={e => updateStatus(t.id, st, e)}
+                                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", background: t.status === st ? "#f7f8fa" : "transparent", fontWeight: t.status === st ? 700 : 400, fontSize: 12, color: STATUS_STYLES[st].text }}
+                                        onMouseEnter={e => e.currentTarget.style.background = "#f7f8fa"}
+                                        onMouseLeave={e => e.currentTarget.style.background = t.status === st ? "#f7f8fa" : "transparent"}>
+                                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_STYLES[st].dot }} />{st}
+                                        {t.status === st && <span style={{ marginLeft: "auto", fontSize: 10, color: "#1a3a6e" }}>✓</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Actions */}
+                              <div style={{ display: "flex", gap: 4 }} onClick={e => e.stopPropagation()}>
+                                {(t.qtyAvailable ?? t.qty) > 0 && (
+                                  <button onClick={() => openSale(t.id)} style={{ background: "rgba(249,115,22,0.1)", color: "#f97316", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)" }}>Sell</button>
+                                )}
+                                <button onClick={() => openEdit(t)} style={{ background: "#ffffff", color: "#64748b", border: "1px solid #e2e6ea", borderRadius: 6, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontFamily: "var(--body)" }}>Edit</button>
+                                <button onClick={() => delTicket(t.id)} style={{ background: "rgba(239,68,68,0.06)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.15)", borderRadius: 6, padding: "3px 7px", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)" }}>✕</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
