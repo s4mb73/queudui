@@ -64,6 +64,7 @@ function dbToSale(row) {
   return {
     id: row.id,
     ticketId: row.ticket_id,
+    ticketIds: row.ticket_ids || [],
     eventName: row.event_name,
     category: row.category,
     qtySold: row.qty_sold,
@@ -74,6 +75,10 @@ function dbToSale(row) {
     platform: row.platform,
     date: row.date,
     notes: row.notes || '',
+    saleStatus: row.sale_status || 'Pending',
+    section: row.section || '',
+    row: row.row || '',
+    seats: row.seats || '',
     recordedAt: row.recorded_at,
   };
 }
@@ -82,6 +87,7 @@ function saleToDb(s) {
   return {
     id: s.id,
     ticket_id: s.ticketId,
+    ticket_ids: s.ticketIds || [s.ticketId],
     event_name: s.eventName,
     category: s.category,
     qty_sold: parseInt(s.qtySold) || 1,
@@ -92,6 +98,10 @@ function saleToDb(s) {
     platform: s.platform,
     date: s.date,
     notes: s.notes || '',
+    sale_status: s.saleStatus || 'Pending',
+    section: s.section || '',
+    row: s.row || '',
+    seats: s.seats || '',
   };
 }
 
@@ -118,7 +128,7 @@ export function useQueudData() {
         if (se) throw se;
         setTicketsState((t || []).map(dbToTicket));
         setSalesState((s || []).map(dbToSale));
-        if (st) setSettingsState({ gmailAccounts: st.gmail_accounts || [], openAiKey: st.open_ai_key || '' });
+        if (st) setSettingsState({ gmailAccounts: st.gmail_accounts || [], openAiKey: st.open_ai_key || '', aycdApiKey: st.aycd_api_key || '' });
       } catch (e) {
         console.error('Load error:', e);
         setError(e.message);
@@ -199,6 +209,7 @@ export function useQueudData() {
         id: 'user_settings',
         gmail_accounts: next.gmailAccounts || [],
         open_ai_key: next.openAiKey || '',
+        aycd_api_key: next.aycdApiKey || '',
       }).then(({ error }) => {
         if (error) console.error('Settings error:', error);
       });

@@ -65,20 +65,34 @@ export default function App() {
     setShowAddTicket(false); setEditingTicket(null); setTf(BLANK_TICKET);
   };
 
-  const saveSale = () => {
-    if (!sf.ticketId || !sf.salePrice) return notify("Select a ticket and enter sale price", "err");
-    const ticket = tickets.find(t => t.id === sf.ticketId);
-    if (!ticket) return;
-    const qtySold = parseInt(sf.qtySold);
-    if (qtySold > (ticket.qtyAvailable ?? ticket.qty)) return notify("Not enough stock available", "err");
+  // saveSale accepts ticketIds array (multi-select) or falls back to sf.ticketId
+  const saveSale = (ticketIds) => {
+    const ids = Array.isArray(ticketIds) && ticketIds.length > 0 ? ticketIds : [sf.ticketId];
+    if (!ids[0] || !sf.salePrice) return notify("Select at least one ticket and enter sale price", "err");
+    const selectedTickets = ids.map(id => tickets.find(t => t.id === id)).filter(Boolean);
+    if (!selectedTickets.length) return;
+    const qtySold = selectedTickets.length;
     const salePrice = parseFloat(sf.salePrice);
     const fees = parseFloat(sf.fees) || 0;
-    const costPer = ticket.costPrice / ticket.qty;
-    const profit = (salePrice * qtySold) - (costPer * qtySold) - fees;
-    setSales(prev => [...prev, { ...sf, id: uid(), qtySold, salePrice, fees, profit, costPer, eventName: ticket.event, category: ticket.category, recordedAt: new Date().toISOString() }]);
-    setTickets(prev => prev.map(t => t.id === sf.ticketId ? { ...t, qtyAvailable: (t.qtyAvailable ?? t.qty) - qtySold } : t));
+    const totalCostBasis = selectedTickets.reduce((a, t) => a + t.costPrice, 0);
+    const profit = (salePrice * qtySold) - totalCostBasis - fees;
+    const costPer = totalCostBasis / qtySold;
+    const firstTicket = selectedTickets[0];
+    // Record one sale entry with qty = number of tickets selected
+    setSales(prev => [...prev, {
+      ...sf, id: uid(), qtySold, salePrice, fees, profit, costPer,
+      saleStatus: "Pending",
+      ticketId: firstTicket.id,
+      ticketIds: ids,
+      eventName: firstTicket.event, category: firstTicket.category,
+      section: firstTicket.section, row: firstTicket.row,
+      seats: selectedTickets.map(t => t.seats).filter(Boolean).join(", "),
+      recordedAt: new Date().toISOString(),
+    }]);
+    // Mark all selected tickets as Sold
+    setTickets(prev => prev.map(t => ids.includes(t.id) ? { ...t, status: "Sold", qtyAvailable: 0 } : t));
     setShowAddSale(false); setSf(BLANK_SALE);
-    notify(`Sale recorded · ${profit >= 0 ? "+" : ""}${fmt(profit)} profit`);
+    notify(`Sale recorded · ${qtySold > 1 ? `${qtySold} tickets · ` : ""}${profit >= 0 ? "+" : ""}${fmt(profit)} profit`);
   };
 
   const importParsed = async (data) => {
@@ -88,7 +102,7 @@ export default function App() {
     if (data.section && (!row || !seats)) {
       const rowMatch = data.section.match(/Row\s*([\w\d]+)/i);
       if (rowMatch) row = row || rowMatch[1];
-      const seatMatch = data.section.match(/Seat[s]?\s*([\d\s\-–]+)/i);
+      const seatMatch = data.section.match(/Seat[s]?\s*([\d\s\-\u2013]+)/i);
       if (seatMatch) seats = seats || seatMatch[1].trim();
       const secMatch = data.section.match(/Sec(?:tion)?\s*([\w\d]+)/i);
       if (secMatch) section = secMatch[1];
@@ -153,6 +167,7 @@ export default function App() {
         .fade-up { animation: fadeUp 0.22s ease forwards; }
         .action-btn { background: #f97316; color: white; border: none; border-radius: 9px; padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--body); transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; letter-spacing: -0.1px; box-shadow: 0 1px 3px rgba(249,115,22,0.3); }
         .action-btn:hover { background: #ea6c0a; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(249,115,22,0.35); }
+        .action-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
         .ghost-btn { background: transparent; color: #64748b; border: 1px solid #e2e6ea; border-radius: 9px; padding: 8px 16px; font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: var(--body); transition: all 0.15s; }
         .ghost-btn:hover { border-color: #1a3a6e; color: #1a3a6e; background: rgba(26,58,110,0.04); }
         .del-btn { background: rgba(239,68,68,0.08); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); border-radius: 7px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--body); transition: all 0.15s; }
@@ -181,7 +196,7 @@ export default function App() {
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
           {view === "dashboard" && <Dashboard tickets={tickets} sales={sales} setView={setView} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} />}
           {view === "inventory" && <Inventory tickets={tickets} setTickets={setTickets} sales={sales} setSales={setSales} settings={settings} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} openSale={openSale} notify={notify} />}
-          {view === "sales" && <Sales tickets={tickets} sales={sales} setShowAddSale={setShowAddSale} />}
+          {view === "sales" && <Sales tickets={tickets} sales={sales} setSales={setSales} setShowAddSale={setShowAddSale} />}
           {view === "settings" && <Settings settings={settings} setSettings={setSettings} tickets={tickets} setTickets={setTickets} sales={sales} notify={notify} importParsed={importParsed} />}
         </div>
       </div>

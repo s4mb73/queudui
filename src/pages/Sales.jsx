@@ -1,29 +1,47 @@
 import { useState, useMemo } from "react";
-import { Badge } from "../components/ui";
+import { KpiCard } from "../components/ui";
 import { fmt, fmtPct } from "../utils/format";
 
-const FONT = "Inter, sans-serif";
-const card = { background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" };
+const card = { background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" };
 
 const STATUS_STYLES = {
-  Pending:   { bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
-  Paid:      { bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
-  Delivered: { bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
-  Cancelled: { bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" },
+  Pending:   { bg: "rgba(245,158,11,0.08)",  color: "#d97706", dot: "#f59e0b",  border: "rgba(245,158,11,0.2)" },
+  Paid:      { bg: "rgba(5,150,105,0.08)",   color: "#059669", dot: "#059669",  border: "rgba(5,150,105,0.2)" },
+  Delivered: { bg: "rgba(26,58,110,0.08)",   color: "#1a3a6e", dot: "#1a3a6e",  border: "rgba(26,58,110,0.2)" },
+  Cancelled: { bg: "#f1f5f9",                color: "#64748b", dot: "#94a3b8",  border: "#e2e6ea" },
+};
+
+const PLATFORM_COLORS = {
+  Viagogo:              "#1a3a6e",
+  Tixstock:             "#059669",
+  Lysted:               "#7c3aed",
+  StubHub:              "#f97316",
+  Viagogo:              "#1a3a6e",
+  "Ticketmaster Resale":"#ef4444",
+  "AXS Official Resale":"#0ea5e9",
+  Default:              "#64748b",
 };
 
 function StatusPill({ status, onChange }) {
   const s = STATUS_STYLES[status] || STATUS_STYLES.Pending;
-  const statuses = Object.keys(STATUS_STYLES);
   return (
     <select
       value={status || "Pending"}
       onChange={e => { e.stopPropagation(); onChange(e.target.value); }}
       onClick={e => e.stopPropagation()}
-      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}`, borderRadius: 5, padding: "3px 7px", fontSize: 11, fontWeight: 600, fontFamily: FONT, cursor: "pointer", outline: "none" }}
+      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}`, borderRadius: 20, padding: "3px 8px", fontSize: 11, fontWeight: 700, fontFamily: "var(--body)", cursor: "pointer", outline: "none" }}
     >
-      {statuses.map(st => <option key={st} value={st}>{st}</option>)}
+      {Object.keys(STATUS_STYLES).map(st => <option key={st} value={st}>{st}</option>)}
     </select>
+  );
+}
+
+function PlatformBadge({ platform }) {
+  const color = PLATFORM_COLORS[platform] || PLATFORM_COLORS.Default;
+  return (
+    <span style={{ background: `${color}14`, color, border: `1px solid ${color}28`, borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 700, letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
+      {platform}
+    </span>
   );
 }
 
@@ -32,14 +50,13 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterPlatform, setFilterPlatform] = useState("All");
 
-  // ── Aggregate KPIs ──────────────────────────────────────────────────────────
   const totalRevenue = sales.reduce((a, s) => a + (s.salePrice * s.qtySold), 0);
   const totalFees    = sales.reduce((a, s) => a + (s.fees || 0), 0);
   const totalCost    = sales.reduce((a, s) => a + (s.costPer * s.qtySold), 0);
   const totalProfit  = totalRevenue - totalFees - totalCost;
   const totalROI     = totalCost > 0 ? ((totalProfit / totalCost) * 100) : 0;
+  const totalQty     = sales.reduce((a, s) => a + s.qtySold, 0);
 
-  // ── Group sales by event ────────────────────────────────────────────────────
   const eventGroups = useMemo(() => {
     const filtered = sales.filter(s => {
       if (filterStatus !== "All" && (s.saleStatus || "Pending") !== filterStatus) return false;
@@ -60,184 +77,197 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
 
   const allPlatforms = [...new Set(sales.map(s => s.platform).filter(Boolean))];
 
-  const updateSaleStatus = (saleId, newStatus) => {
-    setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: newStatus } : s));
+  const updateSaleStatus = (saleId, v) =>
+    setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: v } : s));
+
+  const deleteSale = (saleId, e) => {
+    e.stopPropagation();
+    if (!window.confirm("Delete this sale record?")) return;
+    setSales(prev => prev.filter(s => s.id !== saleId));
   };
 
-  return (
-    <div className="fade-up" style={{ fontFamily: FONT }}>
+  const kpis = [
+    { label: "Total Revenue", value: fmt(totalRevenue), color: "#f97316", iconKey: "kpi_revenue", sub: `${totalQty} ticket${totalQty !== 1 ? "s" : ""} sold` },
+    { label: "Platform Fees", value: fmt(totalFees),    color: "#ef4444", iconKey: "kpi_invested" },
+    { label: "Net Profit",    value: fmt(totalProfit),  color: totalProfit >= 0 ? "#059669" : "#ef4444", iconKey: "kpi_profit" },
+    { label: "ROI",           value: fmtPct(totalROI),  color: totalROI  >= 0 ? "#059669" : "#ef4444", iconKey: "kpi_roi" },
+    { label: "Avg per Sale",  value: sales.length > 0 ? fmt(totalProfit / sales.length) : "—", color: "#1a3a6e", iconKey: "kpi_sold", sub: `${sales.length} transaction${sales.length !== 1 ? "s" : ""}` },
+  ];
 
-      {/* Page header */}
+  return (
+    <div className="fade-up">
+
+      {/* Header — matches Dashboard */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 26, color: "#111827", lineHeight: 1 }}>Sales</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{sales.length} transaction{sales.length !== 1 ? "s" : ""} recorded</div>
+          <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 24, color: "#0f172a", lineHeight: 1, letterSpacing: "-0.5px" }}>Sales</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Track revenue, profit and sale status</div>
         </div>
         <button className="action-btn" onClick={() => setShowAddSale(true)}>+ Record Sale</button>
       </div>
 
-      {/* KPI strip */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 24 }}>
-        {[
-          { label: "Total Revenue",  value: fmt(totalRevenue),  color: "#f97316" },
-          { label: "Platform Fees",  value: fmt(totalFees),     color: "#dc2626" },
-          { label: "Net Profit",     value: fmt(totalProfit),   color: totalProfit >= 0 ? "#16a34a" : "#dc2626" },
-          { label: "ROI",            value: fmtPct(totalROI),   color: totalROI  >= 0 ? "#16a34a" : "#dc2626" },
-          { label: "Avg per Sale",   value: sales.length > 0 ? fmt(totalProfit / sales.length) : "—", color: "#0f172a" },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ ...card, padding: "16px 18px", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: color, borderRadius: "10px 10px 0 0" }} />
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "#6b7280", marginBottom: 8 }}>{label}</div>
-            <div style={{ fontWeight: 700, fontSize: 22, color, lineHeight: 1 }}>{value}</div>
-          </div>
-        ))}
+      {/* KPI strip — same KpiCard as Dashboard */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 18 }}>
+        {kpis.map(k => <KpiCard key={k.label} {...k} />)}
       </div>
 
-      {/* Filters */}
+      {/* Filter bar — matches Inventory */}
       {sales.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Filter:</span>
-          {["All", ...Object.keys(STATUS_STYLES)].map(s => (
-            <button key={s} onClick={() => setFilterStatus(s)}
-              style={{ padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", border: filterStatus === s ? "none" : "0.5px solid #e5e7eb", background: filterStatus === s ? "#111827" : "white", color: filterStatus === s ? "white" : "#6b7280", fontFamily: FONT }}>
-              {s}
-            </button>
-          ))}
-          {allPlatforms.length > 1 && (
-            <>
-              <div style={{ width: 1, height: 16, background: "#e5e7eb", margin: "0 4px" }} />
-              {["All", ...allPlatforms].map(p => (
-                <button key={p} onClick={() => setFilterPlatform(p)}
-                  style={{ padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", border: filterPlatform === p ? "none" : "0.5px solid #e5e7eb", background: filterPlatform === p ? "#f97316" : "white", color: filterPlatform === p ? "white" : "#6b7280", fontFamily: FONT }}>
-                  {p}
+        <div style={{ background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>Status</span>
+          <div style={{ display: "flex", gap: 4 }}>
+            {["All", ...Object.keys(STATUS_STYLES)].map(s => {
+              const st = s !== "All" ? STATUS_STYLES[s] : null;
+              const active = filterStatus === s;
+              return (
+                <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${active ? (st?.dot || "#1a3a6e") : "#e2e6ea"}`, background: active ? (st?.bg || "rgba(26,58,110,0.1)") : "transparent", color: active ? (st?.color || "#1a3a6e") : "#64748b", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)", display: "flex", alignItems: "center", gap: 4 }}>
+                  {st && <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />}{s}
                 </button>
-              ))}
+              );
+            })}
+          </div>
+          {allPlatforms.length > 0 && (
+            <>
+              <div style={{ width: 1, height: 16, background: "#e2e6ea" }} />
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>Platform</span>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {["All", ...allPlatforms].map(p => {
+                  const active = filterPlatform === p;
+                  const color = PLATFORM_COLORS[p] || PLATFORM_COLORS.Default;
+                  return (
+                    <button key={p} onClick={() => setFilterPlatform(p)} style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${active ? color : "#e2e6ea"}`, background: active ? `${color}14` : "transparent", color: active ? color : "#64748b", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)" }}>
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
             </>
           )}
         </div>
       )}
 
-      {/* Sales table */}
+      {/* Table */}
       <div style={{ ...card, overflow: "hidden" }}>
-
-        {/* Header */}
-        <div style={{ display: "grid", gridTemplateColumns: "28px 2fr 90px 70px 80px 80px 80px 110px 20px", gap: 0, padding: "10px 18px", borderBottom: "1px solid #f0f0f3", background: "#fafafa" }}>
-          {["", "Event / Ticket", "Section", "Qty", "Revenue", "Fees", "Profit", "Status", ""].map((h, i) => (
-            <div key={i} style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: "#94a3b8" }}>{h}</div>
+        {/* Column headers */}
+        <div style={{ display: "grid", gridTemplateColumns: "24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "9px 18px", borderBottom: "0.5px solid #e2e6ea", background: "#fafafa" }}>
+          {["", "Event", "Platform", "Qty", "Revenue", "Fees", "Profit", "Status", ""].map((h, i) => (
+            <div key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>{h}</div>
           ))}
         </div>
 
         {sales.length === 0 ? (
-          <div style={{ padding: 56, textAlign: "center" }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>💸</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>No sales yet</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Record your first sale to start tracking P&L</div>
+          <div style={{ padding: "56px 18px", textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>💸</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a" }}>No sales yet</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>Record your first sale to start tracking P&L</div>
             <button className="action-btn" style={{ marginTop: 16 }} onClick={() => setShowAddSale(true)}>Record First Sale</button>
           </div>
         ) : eventGroups.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#6b7280", fontSize: 13 }}>No sales match the current filters</div>
+          <div style={{ padding: 40, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No sales match the current filters</div>
         ) : eventGroups.map((group, gi) => {
           const isExpanded = expandedEvents[group.eventName];
           const groupProfit = group.revenue - group.fees - group.cost;
           const groupROI = group.cost > 0 ? ((groupProfit / group.cost) * 100) : 0;
           const qtySold = group.sales.reduce((a, s) => a + s.qtySold, 0);
+          const accent = group.category === "Sport" ? "#1a3a6e" : "#7c3aed";
+          const platforms = [...new Set(group.sales.map(s => s.platform).filter(Boolean))];
 
           return (
-            <div key={group.eventName} style={{ borderBottom: gi < eventGroups.length - 1 ? "1px solid #f0f0f3" : "none" }}>
+            <div key={group.eventName} style={{ borderBottom: gi < eventGroups.length - 1 ? "0.5px solid #f1f4f8" : "none" }}>
 
-              {/* Event row */}
+              {/* Event group row */}
               <div
+                className="hover-row"
                 onClick={() => setExpandedEvents(s => ({ ...s, [group.eventName]: !s[group.eventName] }))}
-                style={{ display: "grid", gridTemplateColumns: "28px 2fr 90px 70px 80px 80px 80px 110px 20px", gap: 0, padding: "11px 18px", alignItems: "center", cursor: "pointer", background: isExpanded ? "#fafafa" : "white", transition: "background 0.1s" }}
-                onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = "#fafafa"; }}
-                onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = "white"; }}
+                style={{ display: "grid", gridTemplateColumns: "24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "12px 18px", alignItems: "center", cursor: "pointer", background: isExpanded ? "#fafafa" : "white", borderLeft: `3px solid ${accent}`, transition: "background 0.1s" }}
               >
-                {/* Expand toggle */}
-                <div style={{ fontSize: 11, color: "#9ca3af", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s", textAlign: "center" }}>›</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s", textAlign: "center" }}>›</div>
 
-                {/* Event name */}
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{group.eventName}</div>
-                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{group.sales.length} sale{group.sales.length !== 1 ? "s" : ""} · {group.sales.map(s => s.platform).filter((p, i, a) => a.indexOf(p) === i).join(", ")}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.eventName}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{group.sales.length} sale{group.sales.length !== 1 ? "s" : ""}</div>
                 </div>
 
-                {/* Section — blank at event level */}
-                <div />
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {platforms.map(p => <PlatformBadge key={p} platform={p} />)}
+                </div>
 
-                {/* Qty */}
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{qtySold}×</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", fontVariantNumeric: "tabular-nums" }}>{qtySold}×</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", fontVariantNumeric: "tabular-nums" }}>{fmt(group.revenue)}</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>{group.fees > 0 ? fmt(group.fees) : "—"}</div>
 
-                {/* Revenue */}
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{fmt(group.revenue)}</div>
-
-                {/* Fees */}
-                <div style={{ fontSize: 12, color: "#6b7280" }}>{group.fees > 0 ? fmt(group.fees) : "—"}</div>
-
-                {/* Profit */}
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: groupProfit >= 0 ? "#16a34a" : "#dc2626" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: groupProfit >= 0 ? "#059669" : "#ef4444", fontVariantNumeric: "tabular-nums" }}>
                     {groupProfit >= 0 ? "+" : ""}{fmt(groupProfit)}
                   </div>
-                  <div style={{ fontSize: 10, color: groupROI >= 0 ? "#16a34a" : "#dc2626", marginTop: 1 }}>{fmtPct(groupROI)} ROI</div>
+                  <div style={{ fontSize: 10, color: groupROI >= 0 ? "#059669" : "#ef4444", marginTop: 1 }}>{fmtPct(groupROI)} ROI</div>
                 </div>
 
-                {/* Status — blank at event level */}
-                <div />
-                <div />
+                <div /><div />
               </div>
 
-              {/* Individual sales rows */}
+              {/* Individual sale rows */}
               {isExpanded && group.sales.map((s, si) => {
                 const ticket = tickets.find(t => t.id === s.ticketId);
                 const sProfit = (s.salePrice * s.qtySold) - (s.fees || 0) - (s.costPer * s.qtySold);
                 const saleStatus = s.saleStatus || "Pending";
+                const isStanding = ticket && /standing|pitch|floor|ga/i.test(ticket.section || "");
 
                 return (
-                  <div key={s.id}
-                    style={{ display: "grid", gridTemplateColumns: "28px 2fr 90px 70px 80px 80px 80px 110px 20px", gap: 0, padding: "10px 18px 10px 46px", alignItems: "center", background: si % 2 === 0 ? "#fafbfc" : "#f7f8fa", borderTop: "0.5px solid #f0f0f3" }}>
+                  <div key={s.id} style={{ display: "grid", gridTemplateColumns: "24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "10px 18px 10px 40px", alignItems: "center", background: si % 2 === 0 ? "#fafafa" : "#f7f8fa", borderTop: "0.5px solid #f1f4f8" }}>
 
-                    {/* Indent marker */}
-                    <div style={{ width: 2, height: 28, background: "#e5e7eb", borderRadius: 2, margin: "0 auto" }} />
+                    {/* Indent line */}
+                    <div style={{ width: 2, height: 24, background: "#e2e6ea", borderRadius: 2, margin: "0 auto" }} />
 
-                    {/* Ticket detail */}
+                    {/* Seat info */}
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                         {ticket ? (
                           <>
-                            {ticket.section && <span style={{ background: /standing|pitch|floor|ga/i.test(ticket.section) ? "#f0fdfa" : "#eef2ff", color: /standing|pitch|floor|ga/i.test(ticket.section) ? "#0f766e" : "#1a3a6e", border: `1px solid ${/standing|pitch|floor|ga/i.test(ticket.section) ? "#99f6e4" : "#c7d2fe"}`, borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 600, marginRight: 5 }}>{/standing|pitch|floor|ga/i.test(ticket.section) ? ticket.section : `Sec ${ticket.section}`}</span>}
-                            {ticket.row && <span style={{ fontSize: 11, color: "#6b7280" }}>Row {ticket.row} · </span>}
-                            {ticket.seats && <span style={{ fontSize: 11, color: "#6b7280" }}>Seat {ticket.seats}</span>}
+                            {ticket.section && (
+                              <span style={{ background: isStanding ? "#f0fdfa" : "#eef2ff", color: isStanding ? "#0f766e" : "#1a3a6e", border: `1px solid ${isStanding ? "#99f6e4" : "#c7d2fe"}`, borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 600 }}>
+                                {isStanding ? ticket.section : `Sec ${ticket.section}`}
+                              </span>
+                            )}
+                            {ticket.row && <span style={{ fontSize: 11, color: "#64748b" }}>Row {ticket.row}</span>}
+                            {(s.seats || ticket.seats) && (
+                              <span style={{ fontSize: 11, color: "#64748b" }}>
+                                · Seat{(s.seats || ticket.seats || "").includes(",") ? "s" : ""} {s.seats || ticket.seats}
+                              </span>
+                            )}
+                            {s.qtySold > 1 && !s.seats && (
+                              <span style={{ background: "rgba(249,115,22,0.1)", color: "#f97316", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>{s.qtySold}×</span>
+                            )}
                           </>
-                        ) : <span style={{ color: "#9ca3af", fontSize: 11 }}>Ticket removed</span>}
+                        ) : (
+                          <span style={{ color: "#94a3b8", fontSize: 11 }}>Ticket removed</span>
+                        )}
                       </div>
-                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
-                        {s.platform} · {s.date}
-                        {s.notes && ` · ${s.notes}`}
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                        {s.date}{s.notes ? ` · ${s.notes}` : ""}
                       </div>
                     </div>
 
-                    {/* Section */}
-                    <div style={{ fontSize: 11, color: "#6b7280" }}>{ticket?.section || "—"}</div>
+                    <div><PlatformBadge platform={s.platform} /></div>
 
-                    {/* Qty */}
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{s.qtySold}×</div>
-
-                    {/* Revenue */}
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{fmt(s.salePrice * s.qtySold)}</div>
-
-                    {/* Fees */}
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>{s.fees > 0 ? fmt(s.fees) : "—"}</div>
-
-                    {/* Profit */}
-                    <div style={{ fontSize: 12, fontWeight: 700, color: sProfit >= 0 ? "#16a34a" : "#dc2626" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums" }}>{s.qtySold}×</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", fontVariantNumeric: "tabular-nums" }}>{fmt(s.salePrice * s.qtySold)}</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>{s.fees > 0 ? fmt(s.fees) : "—"}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: sProfit >= 0 ? "#059669" : "#ef4444", fontVariantNumeric: "tabular-nums" }}>
                       {sProfit >= 0 ? "+" : ""}{fmt(sProfit)}
                     </div>
 
-                    {/* Status pill */}
                     <StatusPill status={saleStatus} onChange={v => updateSaleStatus(s.id, v)} />
 
-                    {/* spacer */}
-                    <div />
+                    {/* Delete */}
+                    <button
+                      onClick={e => deleteSale(s.id, e)}
+                      title="Delete sale"
+                      style={{ background: "transparent", color: "#d1d9e0", border: "none", cursor: "pointer", padding: "4px", borderRadius: 5, fontSize: 13, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = "#d1d9e0"; e.currentTarget.style.background = "transparent"; }}>
+                      ✕
+                    </button>
                   </div>
                 );
               })}

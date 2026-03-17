@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fmt, today } from "../utils/format";
+import { fmt, today, uid } from "../utils/format";
 import { parseEmail, parseLiverpoolEmail, parseTicketmasterEmail, detectSite, stripEmailForAI, isStandingTicket } from "../utils/parseEmail";
 
 const SITES = [
@@ -7,6 +7,165 @@ const SITES = [
   { value: "liverpool",       label: "Liverpool FC",    subject: "Liverpool FC Booking Confirmation" },
   { value: "generic",         label: "Other / Generic", subject: "" },
 ];
+
+// ── Sale email parsers ────────────────────────────────────────────────────────
+function stripQP(raw) {
+  return raw.replace(/=\r?\n/g, '').replace(/=C2=A3/g, '£').replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+function stripHtmlBasic(html) {
+  return html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&#163;/g, '£').replace(/&#8203;/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+function parseViagogoSaleEmail(raw) {
+  const text = stripHtmlBasic(stripQP(raw));
+  const orderIdM = text.match(/Order\s*ID[:\s]+(\d{6,12})/i);
+  const eventM = text.match(/Event[:\s]+([^\n|]+?)(?:\s*Venue:|$)/i);
+  const venueM = text.match(/Venue[:\s]+([^\n|]+?)(?:\s*Date:|$)/i);
+  const dateM = text.match(/Date[:\s]+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d{1,2},\s+\d{4}[^|]*)/i);
+  const ticketsM = text.match(/Ticket\(s\)[:\s]+([^\n]+)/i);
+  const priceM = text.match(/Price\s+per\s+Ticket[:\s]+£\s*([\d,]+\.?\d*)/i);
+  const totalM = text.match(/Total\s+Proceeds[:\s]+£\s*([\d,]+\.?\d*)/i);
+  const qtyM = text.match(/Number\s+of\s+Tickets[:\s]+(\d+)/i);
+
+  const qty = qtyM ? parseInt(qtyM[1]) : 1;
+  const priceEach = priceM ? parseFloat(priceM[1].replace(/,/g, '')) : (totalM ? parseFloat(totalM[1].replace(/,/g, '')) / qty : 0);
+
+  // Parse section/row/seats from tickets line e.g. "Section ARENA E, Row 15, Seat(s) 27 - 28"
+  let section = '', row = '', seats = '';
+  if (ticketsM) {
+    const t = ticketsM[1];
+    const secM = t.match(/Section\s+([^,]+)/i);
+    const rowM = t.match(/Row\s+(\d+)/i);
+    const seatM = t.match(/Seat\(?s?\)?\s+([\d\s\-–]+)/i);
+    if (secM) section = secM[1].trim();
+    if (rowM) row = rowM[1].trim();
+    if (seatM) {
+      const rangeM = seatM[1].trim().match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      if (rangeM) {
+        const lo = Math.min(parseInt(rangeM[1]), parseInt(rangeM[2]));
+        const hi = Math.max(parseInt(rangeM[1]), parseInt(rangeM[2]));
+        seats = Array.from({ length: hi - lo + 1 }, (_, i) => String(lo + i)).join(', ');
+      } else seats = seatM[1].trim();
+    }
+  }
+
+  return {
+    platform: 'Viagogo',
+    orderId: orderIdM ? orderIdM[1] : '',
+    event: eventM ? eventM[1].trim().substring(0, 60) : '',
+    venue: venueM ? venueM[1].trim().substring(0, 50) : '',
+    date: dateM ? dateM[1].trim() : '',
+    section, row, seats, qty,
+    priceEach,
+    totalProceeds: totalM ? parseFloat(totalM[1].replace(/,/g, '')) : priceEach * qty,
+  };
+}
+
+function parseTixstockSaleEmail(raw) {
+  const text = stripHtmlBasic(stripQP(raw));
+  const orderIdM = text.match(/Order\s+ID[:\s]+([A-Z0-9]+)/i);
+  const eventM = text.match(/Event[:\s|\s]+([^\n|]+?)(?:\s*Event date:|$)/i);
+  const venueM = text.match(/Venue[:\s]+([^\n|]+?)(?:\s*Quantity:|$)/i);
+  const dateM = text.match(/Event\s+date[:\s]+([\d\/]+(?:,\s*[\d:]+)?)/i);
+  const sectionM = text.match(/Section[:\s]+([^\n|]+?)(?:\s*Row:|$)/i);
+  const rowM = text.match(/\bRow[:\s]+([^\n|]+?)(?:\s*Format:|$)/i);
+  const qtyM = text.match(/(?:Number of tickets|Quantity)[:\s]+(\d+)/i);
+  const priceM = text.match(/Price\s+per\s+ticket[:\s]+£\s*([\d,]+\.?\d*)/i);
+  const totalM = text.match(/Total\s+proceeds[:\s]+£\s*([\d,]+\.?\d*)/i);
+
+  const qty = qtyM ? parseInt(qtyM[1]) : 1;
+  const priceEach = priceM ? parseFloat(priceM[1].replace(/,/g, '')) : (totalM ? parseFloat(totalM[1].replace(/,/g, '')) / qty : 0);
+
+  return {
+    platform: 'Tixstock',
+    orderId: orderIdM ? orderIdM[1] : '',
+    event: eventM ? eventM[1].trim().replace(/\s+/g, ' ').substring(0, 60) : '',
+    venue: venueM ? venueM[1].trim().replace(/,.*$/, '').substring(0, 50) : '',
+    date: dateM ? dateM[1].trim() : '',
+    section: sectionM ? sectionM[1].trim().replace(/\s+/g, ' ') : '',
+    row: rowM ? rowM[1].trim() : '',
+    seats: '',
+    qty,
+    priceEach,
+    totalProceeds: totalM ? parseFloat(totalM[1].replace(/,/g, '')) : priceEach * qty,
+  };
+}
+
+function detectSaleSite(raw) {
+  if (/viagogo\.com|automated@orders\.viagogo/i.test(raw)) return 'viagogo';
+  if (/tixstock\.com|orders@tixstock/i.test(raw)) return 'tixstock';
+  return null;
+}
+
+// Sub-component with its own state for ticket selection
+function SaleTicketPicker({ tickets, allTickets, parsedSale, onRecord, fmt }) {
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [searchSec, setSearchSec] = useState("");
+
+  // If we have matches use them, otherwise let user search all available tickets
+  const pool = tickets.length > 0 ? tickets : allTickets.filter(t =>
+    !['Sold','Delivered','Completed'].includes(t.status) &&
+    (!searchSec || (t.section || '').toLowerCase().includes(searchSec.toLowerCase()) ||
+     (t.event || '').toLowerCase().includes(searchSec.toLowerCase()))
+  ).slice(0, 30);
+
+  const toggle = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  if (!parsedSale) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {tickets.length === 0 && (
+        <div>
+          <div style={{ fontSize: 12, color: "#f97316", fontWeight: 600, marginBottom: 6 }}>⚠ No automatic matches found — search manually:</div>
+          <input value={searchSec} onChange={e => setSearchSec(e.target.value)}
+            placeholder="Search by event or section…"
+            style={{ background: "#fafafa", border: "0.5px solid #e5e7eb", padding: "7px 10px", borderRadius: 7, fontSize: 12, width: "100%", outline: "none", fontFamily: "Inter, sans-serif" }} />
+        </div>
+      )}
+      {pool.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>
+            {tickets.length > 0 ? `${pool.length} matching ticket${pool.length !== 1 ? 's' : ''} found` : 'Available tickets'} — select the {parsedSale.qty} sold:
+          </div>
+          <div style={{ border: "0.5px solid #e8e8ec", borderRadius: 7, overflow: "hidden", maxHeight: 240, overflowY: "auto" }}>
+            {pool.map((t, i) => {
+              const isSelected = selectedIds.includes(t.id);
+              return (
+                <div key={t.id} onClick={() => toggle(t.id)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderBottom: i < pool.length - 1 ? "0.5px solid #f5f5f7" : "none", cursor: "pointer", background: isSelected ? "#fff7f0" : "white" }}>
+                  <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${isSelected ? "#f47b20" : "#e5e7eb"}`, background: isSelected ? "#f47b20" : "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {isSelected && <span style={{ color: "white", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#111827" }}>
+                      {t.section && <span style={{ background: "#eef2ff", color: "#1a3a6e", borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 600, marginRight: 5 }}>Sec {t.section}</span>}
+                      {t.row && <span style={{ fontSize: 11, color: "#6b7280" }}>Row {t.row} · </span>}
+                      <span style={{ fontSize: 11, color: "#6b7280" }}>Seat {t.seats || "—"}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{t.event} · cost {fmt(t.costPrice)}</div>
+                  </div>
+                  {isSelected && <span style={{ fontSize: 10, fontWeight: 600, color: "#f47b20" }}>Selected</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={() => onRecord(selectedIds)}
+              disabled={selectedIds.length === 0}
+              style={{ background: selectedIds.length === 0 ? "#e5e7eb" : "#16a34a", color: "white", border: "none", borderRadius: 7, padding: "9px 18px", fontSize: 12, fontWeight: 600, cursor: selectedIds.length === 0 ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif" }}>
+              Record Sale{selectedIds.length > 0 ? ` (${selectedIds.length} ticket${selectedIds.length > 1 ? 's' : ''} · £${(parsedSale.priceEach * selectedIds.length).toFixed(2)})` : ""}
+            </button>
+            {selectedIds.length !== parsedSale.qty && selectedIds.length > 0 && (
+              <span style={{ fontSize: 11, color: "#f59e0b" }}>⚠ {parsedSale.qty} expected, {selectedIds.length} selected</span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function Settings({ settings, setSettings, tickets, setTickets, sales, setSales, notify, importParsed }) {
   const [serverOnline, setServerOnline] = useState(null);
@@ -24,6 +183,9 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
   const [aiParsing, setAiParsing] = useState(false);
   const [aycdApiKey, setAycdApiKey] = useState(settings.aycdApiKey || "");
   const [accountsTab, setAccountsTab] = useState("gmail");
+  const [saleEmailText, setSaleEmailText] = useState("");
+  const [parsedSale, setParsedSale] = useState(null);
+  const [saleMatchedTickets, setSaleMatchedTickets] = useState([]);
 
   function handleSiteChange(val) {
     setBulkSite(val);
@@ -394,6 +556,47 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
     setAiParsing(false);
   }
 
+  function parseSaleEmail() {
+    if (!saleEmailText.trim()) return;
+    const site = detectSaleSite(saleEmailText);
+    if (!site) return notify("Couldn't detect platform — paste a Viagogo or Tixstock sale email", "err");
+    const parsed = site === 'viagogo' ? parseViagogoSaleEmail(saleEmailText) : parseTixstockSaleEmail(saleEmailText);
+    setParsedSale(parsed);
+    // Try to find matching tickets in inventory
+    const matches = tickets.filter(t => {
+      const eventMatch = parsed.event && t.event.toLowerCase().includes(parsed.event.toLowerCase().substring(0, 15));
+      const secMatch = !parsed.section || (t.section || '').toLowerCase().includes(parsed.section.toLowerCase().substring(0, 6));
+      return eventMatch && secMatch && !['Sold','Delivered','Completed'].includes(t.status);
+    });
+    setSaleMatchedTickets(matches.slice(0, 20));
+  }
+
+  function recordParsedSale(ticketIds) {
+    if (!parsedSale || !ticketIds.length) return;
+    const selectedTickets = ticketIds.map(id => tickets.find(t => t.id === id)).filter(Boolean);
+    if (!selectedTickets.length) return;
+    const qtySold = selectedTickets.length;
+    const salePrice = parsedSale.priceEach;
+    const totalCostBasis = selectedTickets.reduce((a, t) => a + t.costPrice, 0);
+    const profit = (salePrice * qtySold) - totalCostBasis;
+    const costPer = totalCostBasis / qtySold;
+    const firstTicket = selectedTickets[0];
+    setSales(prev => [...prev, {
+      id: uid(), ticketId: firstTicket.id, ticketIds,
+      qtySold, salePrice, fees: 0, profit, costPer,
+      saleStatus: 'Pending',
+      platform: parsedSale.platform,
+      eventName: firstTicket.event, category: firstTicket.category,
+      section: firstTicket.section, row: firstTicket.row,
+      seats: selectedTickets.map(t => t.seats).filter(Boolean).join(', '),
+      date: today(), notes: `${parsedSale.platform} order ${parsedSale.orderId}`,
+      recordedAt: new Date().toISOString(),
+    }]);
+    setTickets(prev => prev.map(t => ticketIds.includes(t.id) ? { ...t, status: 'Sold', qtyAvailable: 0 } : t));
+    setSaleEmailText(''); setParsedSale(null); setSaleMatchedTickets([]);
+    notify(`Sale recorded · ${qtySold > 1 ? `${qtySold} tickets · ` : ''}${profit >= 0 ? '+' : ''}${fmt(profit)} profit`);
+  }
+
   const gmailAccounts = settings.gmailAccounts || [];
   const inputStyle = { background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "Inter, sans-serif", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" };
 
@@ -479,6 +682,65 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
               </div>
             </div>
           )}
+        </div>
+
+        {/* ── Sales Platforms ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🏪</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Sales Platforms</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Associate selling accounts with each platform</div>
+            </div>
+          </div>
+          <div style={{ padding: "16px 18px", display: "grid", gap: 14 }}>
+            {[
+              { id: "tixstock",  label: "Tixstock",  color: "#059669", icon: "📦" },
+              { id: "viagogo",   label: "Viagogo",   color: "#1a3a6e", icon: "🎫" },
+              { id: "lysted",    label: "Lysted",    color: "#7c3aed", icon: "📋" },
+              { id: "stubhub",   label: "StubHub",   color: "#f97316", icon: "🎟" },
+            ].map(platform => {
+              const key = `salesPlatform_${platform.id}`;
+              const saved = settings[key] || { email: "", notes: "" };
+              return (
+                <div key={platform.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr", gap: 12, alignItems: "center", padding: "12px 14px", background: "#fafafa", borderRadius: 8, border: "0.5px solid #f0f0f3" }}>
+                  {/* Platform badge */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 110 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 7, background: `${platform.color}14`, border: `1px solid ${platform.color}28`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{platform.icon}</div>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: platform.color }}>{platform.label}</span>
+                  </div>
+                  {/* Email dropdown */}
+                  <div>
+                    <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Selling Account</label>
+                    <select
+                      value={saved.email || ""}
+                      onChange={e => setSettings(s => ({ ...s, [key]: { ...saved, email: e.target.value } }))}
+                      style={{ ...inputStyle, fontSize: 12 }}>
+                      <option value="">No account linked…</option>
+                      {gmailAccounts.map(a => <option key={a.email} value={a.email}>{a.email}</option>)}
+                      <option value="__other__">Other (enter below)</option>
+                    </select>
+                    {saved.email === "__other__" && (
+                      <input
+                        value={saved.customEmail || ""}
+                        onChange={e => setSettings(s => ({ ...s, [key]: { ...saved, customEmail: e.target.value } }))}
+                        placeholder="seller@email.com"
+                        style={{ ...inputStyle, marginTop: 6 }} />
+                    )}
+                  </div>
+                  {/* Notes */}
+                  <div>
+                    <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Notes / Username</label>
+                    <input
+                      value={saved.notes || ""}
+                      onChange={e => setSettings(s => ({ ...s, [key]: { ...saved, notes: e.target.value } }))}
+                      placeholder={`e.g. ${platform.label} seller username`}
+                      style={{ ...inputStyle, fontSize: 12 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* ── Email Scraper ── */}
@@ -685,6 +947,61 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
                 <button className="action-btn" onClick={() => { importParsed(parsed); setEmailText(""); setParsed(null); }}>
                   Import &amp; Review →
                 </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Sale Notification Emails ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💰</div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Sale Notification Emails</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Paste a Viagogo or Tixstock sale email to auto-record against inventory</div>
+            </div>
+          </div>
+          <div style={{ padding: "16px 18px", display: "grid", gap: 12 }}>
+            <textarea value={saleEmailText} onChange={e => { setSaleEmailText(e.target.value); setParsedSale(null); setSaleMatchedTickets([]); }}
+              placeholder={"Paste a Viagogo or Tixstock sale confirmation email here…"}
+              style={{ ...inputStyle, height: 110, resize: "vertical", lineHeight: 1.7, padding: "12px 14px" }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="action-btn" onClick={parseSaleEmail} disabled={!saleEmailText.trim()}>Parse Sale Email</button>
+              <button className="ghost-btn" onClick={() => { setSaleEmailText(''); setParsedSale(null); setSaleMatchedTickets([]); }}>Clear</button>
+            </div>
+
+            {parsedSale && (
+              <div style={{ display: "grid", gap: 12 }}>
+                {/* Parsed summary */}
+                <div style={{ background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: 8, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#15803d", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>{parsedSale.platform} · Order {parsedSale.orderId}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {[
+                      ["Event", parsedSale.event || "—"],
+                      ["Date", parsedSale.date || "—"],
+                      ["Venue", parsedSale.venue || "—"],
+                      ["Section / Row", [parsedSale.section && `Sec ${parsedSale.section}`, parsedSale.row && `Row ${parsedSale.row}`].filter(Boolean).join(" · ") || "—"],
+                      ["Seats", parsedSale.seats || "—"],
+                      ["Qty", String(parsedSale.qty)],
+                      ["Price each", `£${parsedSale.priceEach.toFixed(2)}`],
+                      ["Total proceeds", `£${parsedSale.totalProceeds.toFixed(2)}`],
+                    ].map(([label, val]) => (
+                      <div key={label} style={{ background: "white", padding: "8px 10px", borderRadius: 6, border: "0.5px solid #e8e8ec" }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{label}</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: val === "—" ? "#d1d5db" : "#111827" }}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Ticket picker */}
+                <SaleTicketPicker
+                  tickets={saleMatchedTickets}
+                  allTickets={tickets}
+                  parsedSale={parsedSale}
+                  onRecord={recordParsedSale}
+                  fmt={fmt}
+                />
               </div>
             )}
           </div>
