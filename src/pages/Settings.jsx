@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fmt, today, detectCurrency } from "../utils/format";
+import { fmt, today } from "../utils/format";
 import { parseEmail, parseLiverpoolEmail, parseTicketmasterEmail, detectSite, stripEmailForAI, isStandingTicket } from "../utils/parseEmail";
 
 const SITES = [
@@ -8,7 +8,7 @@ const SITES = [
   { value: "generic",         label: "Other / Generic", subject: "" },
 ];
 
-export default function Settings({ settings, setSettings, tickets, setTickets, sales, notify, importParsed }) {
+export default function Settings({ settings, setSettings, tickets, setTickets, sales, setSales, notify, importParsed }) {
   const [serverOnline, setServerOnline] = useState(null);
   const [bulkSelectedAccount, setBulkSelectedAccount] = useState("");
   const [bulkSite, setBulkSite] = useState("");
@@ -43,15 +43,17 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
   }
 
   function addGmailAccount() {
-    var email = document.getElementById("gmail-email-input").value.trim();
-    var pass = document.getElementById("gmail-pass-input").value.trim();
+    const emailEl = document.getElementById("gmail-email-input");
+    const passEl = document.getElementById("gmail-pass-input");
+    const email = emailEl.value.trim();
+    const pass = passEl.value.trim();
     if (!email || !pass) return notify("Enter both email and app password", "err");
     if (!email.includes("@")) return notify("Enter a valid email address", "err");
-    var existing = settings.gmailAccounts || [];
+    const existing = settings.gmailAccounts || [];
     if (existing.find(a => a.email === email)) return notify("Account already added", "err");
-    setSettings(s => ({ ...s, gmailAccounts: existing.concat([{ email, appPassword: pass, addedAt: new Date().toISOString() }]) }));
-    document.getElementById("gmail-email-input").value = "";
-    document.getElementById("gmail-pass-input").value = "";
+    setSettings(s => ({ ...s, gmailAccounts: [...existing, { email, appPassword: pass, addedAt: new Date().toISOString() }] }));
+    emailEl.value = "";
+    passEl.value = "";
     notify("Gmail account added");
   }
 
@@ -61,9 +63,10 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
   }
 
   function fetchEmails() {
-    var acc = (settings.gmailAccounts || []).find(a => a.email === bulkSelectedAccount);
+    const acc = (settings.gmailAccounts || []).find(a => a.email === bulkSelectedAccount);
     if (!acc) return notify("Select a Gmail account first", "err");
     setBulkFetching(true); setBulkEmails([]); setBulkParsed([]); setBulkSelected({});
+    setParseProgress({ done: 0, total: 0 });
     fetch("http://localhost:3001/fetch-emails", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -73,7 +76,7 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
       .then(data => {
         if (!data.ok) throw new Error(data.error || "Fetch failed");
         setBulkEmails(data.emails || []);
-        notify("Found " + (data.emails || []).length + " emails");
+        notify(`Found ${(data.emails || []).length} emails`);
       })
       .catch(e => notify("Error: " + e.message, "err"))
       .finally(() => setBulkFetching(false));
@@ -81,21 +84,20 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
 
   function extractEmail(raw) {
     if (!raw) return "";
-    var m = raw.match(/<([^>]+@[^>]+)>/);
+    const m = raw.match(/<([^>]+@[^>]+)>/);
     if (m) return m[1].trim();
-    var p = raw.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i);
-    if (p) return p[0].trim();
-    return raw.trim();
+    const p = raw.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i);
+    return p ? p[0].trim() : raw.trim();
   }
 
   function parseSeats(seatsStr) {
     if (!seatsStr) return [];
-    var s = seatsStr.replace(/seat[s]?\s*/gi, "").trim();
-    var rangeMatch = s.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+    const s = seatsStr.replace(/seat[s]?\s*/gi, "").trim();
+    const rangeMatch = s.match(/^(\d+)\s*[-–]\s*(\d+)$/);
     if (rangeMatch) {
-      var start = parseInt(rangeMatch[1]), end = parseInt(rangeMatch[2]);
-      if (start > end) { var tmp = start; start = end; end = tmp; }
-      var arr = []; for (var n = start; n <= end; n++) arr.push(n.toString()); return arr;
+      let start = parseInt(rangeMatch[1]), end = parseInt(rangeMatch[2]);
+      if (start > end) [start, end] = [end, start];
+      return Array.from({ length: end - start + 1 }, (_, i) => String(start + i));
     }
     if (s.includes(",")) return s.split(",").map(x => x.trim()).filter(x => /^\d+$/.test(x)).sort((a, b) => parseInt(a) - parseInt(b));
     if (/^\d+$/.test(s)) return [s];
@@ -103,571 +105,624 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
   }
 
   async function parseSelected() {
-    var selected = bulkEmails.filter(e => bulkSelected[e.uid]);
+    const selected = bulkEmails.filter(e => bulkSelected[e.uid]);
     if (!selected.length) return notify("Select at least one email", "err");
-    setBulkParsing(true); setBulkParsed([]);
+    setBulkParsing(true);
+    setBulkParsed([]);
     setParseProgress({ done: 0, total: selected.length });
-
     const site = bulkSite;
 
-    // Liverpool FC — use dedicated parser, returns multiple tickets per email
+    // ── Shared: pre-strip all bodies once up front ────────────────────────────
+    // stripEmailForAI is expensive on large HTML bodies — do it once per email,
+    // not once per retry/fallback
+    const stripped = new Map(selected.map(e => [e.uid, stripEmailForAI(e.body || "")]));
+
+    // ── Shared: result accumulator with live UI updates ───────────────────────
+    const resultMap = new Map(); // uid_seat → result, prevents duplicates
+    let doneCount = 0;
+    function addResults(items) {
+      items.forEach(r => resultMap.set(r._uid, r));
+      doneCount = Math.min(doneCount + items.length > selected.length ? selected.length : doneCount, selected.length);
+    }
+    function flushUI(done) {
+      setBulkParsed([...resultMap.values()]);
+      setParseProgress({ done, total: selected.length });
+    }
+
+    // ── Liverpool FC — pure regex, instant ───────────────────────────────────
     if (site === "liverpool") {
-      var allResults = [];
       selected.forEach(email => {
         try {
-          const tickets = parseLiverpoolEmail(email.subject + "\n" + email.body);
-          tickets.forEach(t => {
-            allResults.push({ ...t, originalCurrency: "GBP", originalAmount: t.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid + "_" + (t.seats || Math.random()) });
+          parseLiverpoolEmail(email.subject + "\n" + email.body).forEach(r => {
+            const uid = email.uid + "_" + (r.seats || Math.random());
+            resultMap.set(uid, { ...r, originalCurrency: "GBP", originalAmount: r.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: uid });
           });
-        } catch (e) {
-          console.error("LFC parse error", e);
-        }
+        } catch(e) { console.error("LFC parse error", e); }
       });
-      setBulkParsed(allResults);
+      setBulkParsed([...resultMap.values()]);
       setBulkParsing(false);
       setParseProgress({ done: selected.length, total: selected.length });
-      notify("Parsed " + allResults.length + " tickets from " + selected.length + " emails");
+      notify(`Parsed ${resultMap.size} tickets from ${selected.length} emails`);
       return;
     }
 
-    // Ticketmaster UK — AI multi-seat parser (falls back to regex if no key)
+    // ── Ticketmaster UK ───────────────────────────────────────────────────────
+    // Strategy: regex handles everything structural (seats, price, date, venue)
+    // instantly. AI only cleans the event name — one call per batch of 20
+    // subjects, not one call per email. Much faster and still consistent.
     if (site === "ticketmaster_uk") {
+
+      // Step 1: regex parse everything — instant
+      selected.forEach(email => {
+        try {
+          parseTicketmasterEmail(email.subject + "\n" + stripped.get(email.uid)).forEach((r, i) => {
+            const uid = email.uid + "_" + (r.seats || i);
+            resultMap.set(uid, { ...r, originalCurrency: "GBP", originalAmount: r.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: uid });
+          });
+        } catch(e) { console.error("TM parse error", e); }
+      });
+
+      // Show regex results immediately — user sees everything right away
+      flushUI(selected.length);
+
       if (!settings.openAiKey) {
-        // Regex fallback
-        var allResults = [];
-        selected.forEach(email => {
-          try {
-            const tickets = parseTicketmasterEmail(email.subject + "\n" + email.body);
-            const currency = /£/.test(email.body) ? "GBP" : "USD";
-            tickets.forEach((t, i) => {
-              allResults.push({ ...t, originalCurrency: currency, originalAmount: t.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid + "_" + (t.seats || i) });
-            });
-          } catch (e) { console.error("TM parse error", e); }
-        });
-        setBulkParsed(allResults);
         setBulkParsing(false);
-        setParseProgress({ done: selected.length, total: selected.length });
-        notify("Parsed " + allResults.length + " tickets from " + selected.length + " emails (regex)");
+        notify(`Parsed ${resultMap.size} tickets from ${selected.length} emails`);
         return;
       }
 
-      // AI path — send emails in batches of 5, one API call per batch
-      var tmResults = [];
-      const BATCH = 5;
-      setParseProgress({ done: 0, total: selected.length });
+      // Step 2: clean up event names with AI — send ALL subjects in one or two
+      // calls (20 per call), not one call per email. Tiny payload = fast.
+      // Deduplicate subjects first — no point asking AI about the same event twice
+      const uniqueSubjects = [...new Set(selected.map(e => e.subject))];
+      const EVENT_BATCH = 20;
+      const eventNameMap = new Map(); // raw subject → cleaned name
 
-      for (var bi = 0; bi < selected.length; bi += BATCH) {
-        var batch = selected.slice(bi, bi + BATCH);
-        var emailsText = batch.map((email, idx) => {
-          var body = (email.body || "").substring(0, 800);
-          return "--- EMAIL " + (idx + 1) + " ---\nSubject: " + email.subject + "\n" + body;
-        }).join("\n\n");
-
-        try {
-          var controller = new AbortController();
-          var timeout = setTimeout(() => controller.abort(), 30000);
-          var res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            signal: controller.signal,
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + settings.openAiKey },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              max_tokens: 2000,
-              temperature: 0,
-              messages: [{ role: "user", content:
-                "Parse " + batch.length + " Ticketmaster UK emails. Return a JSON array, one object per seat/ticket.\n" +
-                "Fields: emailIndex(1-based),event,date,time,venue,section,row,seats,qty,costPrice,orderRef,category,restrictions,isStanding\n" +
-                "- event: subject minus \"You're in! Your \" and \" ticket confirmation\"\n" +
-                "- date: DD Mon YYYY\n" +
-                "- seats: one seat number per object for seated tickets\n" +
-                "- costPrice: Total incl fee divided by seat count\n" +
-                "- isStanding: true for Standing/Pitch — one object, qty=total\n" +
-                "- restrictions: remove \"Album Pre-Order Pre-Sale - \" prefix\n" +
-                "Return ONLY the JSON array.\n\n" + emailsText
-              }]
-            })
-          });
-          clearTimeout(timeout);
-          var data = await res.json();
-          if (!res.ok) throw new Error(data?.error?.message || "API error " + res.status);
-          var txt = data.choices?.[0]?.message?.content || "[]";
-          var parsed = JSON.parse(txt.replace(/```json|```/g, "").trim());
-          var arr = Array.isArray(parsed) ? parsed : [parsed];
-          arr.forEach((p, i) => {
-            var emailIdx = Math.max(0, Math.min((p.emailIndex || 1) - 1, batch.length - 1));
-            var email = batch[emailIdx];
-            var currency = /£/.test(email.body || "") ? "GBP" : "USD";
-            Object.keys(p).forEach(k => { if (p[k] === "null" || p[k] === null) p[k] = k === "isStanding" ? false : k === "qty" || k === "costPrice" ? 0 : ""; });
-            tmResults.push({ ...p, originalCurrency: currency, originalAmount: p.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid + "_" + (p.seats || i) });
-          });
-        } catch(e) {
-          console.error("Batch AI error:", e.message);
-          // Regex fallback for this batch
-          batch.forEach(email => {
-            var currency = /£/.test(email.body || "") ? "GBP" : "USD";
-            parseTicketmasterEmail(email.subject + "\n" + (email.body || "")).forEach((t, i) => {
-              tmResults.push({ ...t, originalCurrency: currency, originalAmount: t.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid + "_" + (t.seats || i) });
+      await Promise.all(
+        Array.from({ length: Math.ceil(uniqueSubjects.length / EVENT_BATCH) }, (_, i) =>
+          uniqueSubjects.slice(i * EVENT_BATCH, (i + 1) * EVENT_BATCH)
+        ).map(async subjectBatch => {
+          const subjectList = subjectBatch.map((s, i) => `${i + 1}. ${s}`).join("\n");
+          try {
+            const res = await fetch("https://api.openai.com/v1/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": "Bearer " + settings.openAiKey },
+              body: JSON.stringify({
+                model: "gpt-4o-mini",
+                max_tokens: 500,
+                temperature: 0,
+                messages: [{
+                  role: "user",
+                  content:
+                    "These are Ticketmaster UK email subjects. Clean up each event name.\n" +
+                    "Rules:\n" +
+                    "- Remove ONLY: \"You're in! Your \", \" ticket confirmation\"\n" +
+                    "- Keep EVERYTHING else exactly — artist name AND full tour name\n" +
+                    "- Do NOT remove subtitles, tour names, or any words after colons or dashes\n" +
+                    "Examples:\n" +
+                    "  \"You're in! Your HARRY STYLES: LOVE ON TOUR ticket confirmation\" → \"HARRY STYLES: LOVE ON TOUR\"\n" +
+                    "  \"You're in! Your Oasis - Live '25 ticket confirmation\" → \"Oasis - Live '25\"\n" +
+                    "  \"You're in! Your HARRY STYLES: TOGETHER, TOGETHER ticket confirmation\" → \"HARRY STYLES: TOGETHER, TOGETHER\"\n" +
+                    "Return JSON: {\"1\": \"name\", \"2\": \"name\", ...}\n\n" +
+                    subjectList
+                }]
+              })
             });
-          });
-        }
-        setParseProgress({ done: Math.min(bi + BATCH, selected.length), total: selected.length });
-        setBulkParsed([...tmResults]); // update preview as we go
+            const data = await res.json();
+            const txt = (data.choices?.[0]?.message?.content || "{}").replace(/```json|```/g, "").trim();
+            const nameMap = JSON.parse(txt);
+            subjectBatch.forEach((subject, i) => {
+              const cleaned = nameMap[String(i + 1)];
+              if (cleaned && cleaned.trim()) eventNameMap.set(subject, cleaned.trim().substring(0, 60));
+            });
+          } catch(e) {
+            console.error("Event name AI error:", e.message);
+            // Keep regex names — no update needed
+          }
+        })
+      );
+
+      // Step 3: apply cleaned event names to all results
+      if (eventNameMap.size > 0) {
+        resultMap.forEach((ticket, key) => {
+          const cleanedName = eventNameMap.get(ticket._subject);
+          if (cleanedName) resultMap.set(key, { ...ticket, event: cleanedName });
+        });
+        flushUI(selected.length);
       }
 
       setBulkParsing(false);
-      notify("Parsed " + tmResults.length + " tickets from " + selected.length + " emails");
+      notify(`Parsed ${resultMap.size} tickets from ${selected.length} emails`);
       return;
     }
-    // Generic — regex fallback or AI
-    if (!settings.openAiKey) {
-      var regexResults = selected.map(email => {
-        var p = parseEmail(email.subject + "\n" + email.body, site);
-        var currency = /£/.test(email.body) ? "GBP" : /€/.test(email.body) ? "EUR" : "USD";
-        return { ...p, originalCurrency: currency, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid };
-      });
-      setBulkParsed(regexResults);
+
+    // ── Generic — regex first, AI only for low-confidence results ────────────
+    const GENERIC_SYSTEM = "Extract ticket info. Return ONLY JSON: {event,date,time,venue,section,row,seats,qty,costPrice,orderRef,category,restrictions,isStanding}. costPrice=total including fees. isStanding=true for Standing/Pitch/Floor/GA.";
+    const needsAI = [];
+
+    selected.forEach(email => {
+      const currency = /£/.test(email.body || "") ? "GBP" : /€/.test(email.body || "") ? "EUR" : "USD";
+      const p = parseEmail(email.subject + "\n" + stripped.get(email.uid));
+      if (p.confidence === "high" || (!settings.openAiKey)) {
+        // High confidence or no AI key — use regex result directly
+        resultMap.set(email.uid, { ...p, originalCurrency: currency, originalAmount: p.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid });
+      } else {
+        // Low/medium confidence — queue for AI, but store regex result as placeholder
+        resultMap.set(email.uid, { ...p, originalCurrency: currency, originalAmount: p.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid });
+        needsAI.push({ email, currency });
+      }
+    });
+
+    // Show regex results immediately
+    flushUI(selected.length - needsAI.length);
+
+    if (needsAI.length === 0) {
       setBulkParsing(false);
-      setParseProgress({ done: regexResults.length, total: regexResults.length });
-      notify("Parsed " + regexResults.length + " emails");
+      notify(`Parsed ${resultMap.size} emails`);
       return;
     }
 
-    const BATCH_SIZE = 10;
-    var allResults = []; var done = 0;
+    notify(`${selected.length - needsAI.length > 0 ? (selected.length - needsAI.length) + " done · " : ""}Sending ${needsAI.length} to AI…`);
 
-    async function parseOne(email) {
-      var currency = /£/.test(email.body || "") ? "GBP" : /€/.test(email.body || "") ? "EUR" : "USD";
+    // Fire all AI calls simultaneously
+    await Promise.all(needsAI.map(async ({ email, currency }) => {
       try {
-        var res = await fetch("https://api.openai.com/v1/chat/completions", {
+        const res = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + settings.openAiKey },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
-            max_tokens: 300,
-            messages: [{
-              role: "user",
-              content: "Extract ticket info from this " + (site === "ticketmaster_uk" ? "Ticketmaster UK" : "ticket") + " confirmation email. Return ONLY compact JSON with keys: event,date,time,venue,section,row,seats,qty,costPrice,orderRef,category,accountEmail,restrictions,isStanding.\n" +
-                "- qty: from Nx Mobile Ticket pattern\n" +
-                "- seats: comma-separated seat numbers\n" +
-                "- isStanding: true if Standing/Pitch/Floor/GA\n" +
-                "- restrictions: WITHOUT Album Pre-Order Pre-Sale - prefix\n" +
-                "- costPrice: from Total (incl. fee) amount\n" +
-                "- date: DD Mon YYYY\n\n" +
-                "Subject: " + email.subject + "\n" + (email.body || "").substring(0, 2500)
-            }],
+            model: "gpt-4o-mini", max_tokens: 400, temperature: 0,
+            messages: [
+              { role: "system", content: GENERIC_SYSTEM },
+              { role: "user", content: "Subject: " + email.subject + "\n" + stripped.get(email.uid).substring(0, 2000) }
+            ]
           })
         });
-        var data = await res.json();
-        var content = data.choices?.[0]?.message?.content || "";
-        var p = JSON.parse(content.replace(/```json|```/g, "").trim());
-        Object.keys(p).forEach(k => { if (p[k] === "null" || p[k] === null) p[k] = k === "isStanding" ? false : k === "qty" || k === "costPrice" ? 0 : ""; });
-        done++;
-        setParseProgress(prev => ({ done, total: prev.total }));
-        return { ...p, originalCurrency: currency, originalAmount: p.costPrice, accountEmail: extractEmail(p.accountEmail || email.to), _subject: email.subject, _uid: email.uid };
+        const data = await res.json();
+        const p = JSON.parse((data.choices?.[0]?.message?.content || "{}").replace(/```json|```/g, "").trim());
+        Object.keys(p).forEach(k => { if (p[k] === "null" || p[k] === null) p[k] = k === "isStanding" ? false : k === "costPrice" ? 0 : ""; });
+        resultMap.set(email.uid, { ...p, originalCurrency: currency, originalAmount: p.costPrice, accountEmail: extractEmail(p.accountEmail || email.to), _subject: email.subject, _uid: email.uid });
       } catch(e) {
-        done++;
-        setParseProgress(prev => ({ done, total: prev.total }));
-        var fallback = parseEmail(email.subject + "\n" + (email.body || ""), site);
-        return { ...fallback, originalCurrency: currency, originalAmount: fallback.costPrice, accountEmail: extractEmail(email.to), _subject: email.subject, _uid: email.uid };
+        // Keep the regex placeholder already in resultMap — don't overwrite with nothing
+        console.error("Generic AI error:", e.message);
       }
-    }
+      doneCount++;
+      flushUI(selected.length - needsAI.length + doneCount);
+    }));
 
-    for (var b = 0; b < selected.length; b += BATCH_SIZE) {
-      var batch = selected.slice(b, b + BATCH_SIZE);
-      var batchResults = await Promise.all(batch.map(parseOne));
-      allResults = allResults.concat(batchResults);
-      setBulkParsed(allResults.slice());
-    }
     setBulkParsing(false);
-    notify("Parsed " + allResults.length + " emails");
+    notify(`Parsed ${resultMap.size} emails`);
   }
 
   async function importAll() {
-    var imported = 0, skipped = 0;
+    let skipped = 0;
     notify("Converting currencies and importing...");
-    var rateCache = { USD: 1 };
-
-    var currencies = [...new Set(bulkParsed.map(p => p.originalCurrency || "USD"))].filter(c => c !== "USD");
-    for (var i = 0; i < currencies.length; i++) {
-      var cur = currencies[i];
+    const rateCache = { USD: 1 };
+    const currencies = [...new Set(bulkParsed.map(p => p.originalCurrency || "USD"))].filter(c => c !== "USD");
+    for (const cur of currencies) {
       try {
-        var r = await fetch("https://open.er-api.com/v6/latest/" + cur);
-        var d = await r.json();
+        const r = await fetch("https://open.er-api.com/v6/latest/" + cur);
+        const d = await r.json();
         rateCache[cur] = d.result === "success" ? d.rates.USD : (cur === "GBP" ? 1.27 : 1.08);
       } catch(e) { rateCache[cur] = cur === "GBP" ? 1.27 : 1.08; }
     }
 
-    var newTickets = [];
-
+    const newTickets = [];
     bulkParsed.forEach(p => {
       if (!p.event && !p._subject) return;
-      var originalCurrency = p.originalCurrency || "USD";
-      var originalAmount = parseFloat(p.costPrice) || 0;
-      var exchangeRate = rateCache[originalCurrency] || 1;
-      var totalCostUSD = originalCurrency !== "USD" ? parseFloat((originalAmount * exchangeRate).toFixed(2)) : originalAmount;
-      var orderRef = p.orderRef || "";
-      var standing = p.isStanding || isStandingTicket(p.restrictions || "");
-
+      const origCurrency = p.originalCurrency || "USD";
+      const origAmount = parseFloat(p.costPrice) || 0;
+      const rate = rateCache[origCurrency] || 1;
+      const totalUSD = origCurrency !== "USD" ? parseFloat((origAmount * rate).toFixed(2)) : origAmount;
+      const orderRef = p.orderRef || "";
+      const standing = p.isStanding || isStandingTicket(p.restrictions || "");
       const base = {
         event: (p.event || p._subject || "").substring(0, 60),
         category: p.category || "Concert",
         subtype: "", date: p.date || "", time: p.time || "",
-        venue: p.venue || "",
-        originalCurrency, originalAmount, exchangeRate, orderRef,
-        parentOrderRef: orderRef,
-        notes: p.notes || "",
-        accountEmail: p.accountEmail || "",
+        venue: p.venue || "", originalCurrency: origCurrency, originalAmount: origAmount,
+        exchangeRate: rate, orderRef, parentOrderRef: orderRef,
+        notes: "", accountEmail: p.accountEmail || "",
         restrictions: (p.restrictions || "").replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, "").trim(),
-        status: "Unsold",
-        addedAt: new Date().toISOString(),
+        status: "Unsold", addedAt: new Date().toISOString(),
       };
 
       if (standing) {
-        var qty = parseInt(p.qty) || 1;
-        newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: "", row: "", seats: "", qty, costPrice: totalCostUSD, qtyAvailable: qty });
-        imported++;
+        const qty = parseInt(p.qty) || 1;
+        newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: "", seats: "", qty, costPrice: totalUSD, qtyAvailable: qty });
+      } else if ((bulkSite === "liverpool" || bulkSite === "ticketmaster_uk") && p.seats !== undefined) {
+        newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: p.seats || "", qty: 1, costPrice: totalUSD, qtyAvailable: 1 });
       } else {
-        // Liverpool FC & Ticketmaster UK: each parsed result is already one seat
-        if ((bulkSite === "liverpool" || bulkSite === "ticketmaster_uk") && p.seats !== undefined) {
-          newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: p.seats || "", qty: p.qty || 1, costPrice: totalCostUSD, qtyAvailable: p.qty || 1 });
-          imported++;
+        const seatsList = parseSeats(p.seats);
+        const totalQty = seatsList.length || parseInt(p.qty) || 1;
+        const costPerSeat = parseFloat((totalUSD / totalQty).toFixed(2));
+        const origPerSeat = parseFloat((origAmount / totalQty).toFixed(2));
+        if (seatsList.length > 0) {
+          seatsList.forEach(seat => newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: seat, qty: 1, costPrice: costPerSeat, qtyAvailable: 1, originalAmount: origPerSeat }));
         } else {
-          var seatsList = parseSeats(p.seats);
-          var totalQty = seatsList.length || parseInt(p.qty) || 1;
-          var costPerSeat = totalQty > 0 ? parseFloat((totalCostUSD / totalQty).toFixed(2)) : totalCostUSD;
-          var origPerSeat = totalQty > 0 ? parseFloat((originalAmount / totalQty).toFixed(2)) : originalAmount;
-
-          if (seatsList.length > 0) {
-            seatsList.forEach(seat => {
-              newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: seat, qty: 1, costPrice: costPerSeat, qtyAvailable: 1, originalAmount: origPerSeat });
-              imported++;
-            });
-          } else {
-            var qty2 = parseInt(p.qty) || 1;
-            newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: "", qty: qty2, costPrice: totalCostUSD, qtyAvailable: qty2 });
-            imported++;
-          }
+          const qty = parseInt(p.qty) || 1;
+          newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: "", qty, costPrice: totalUSD, qtyAvailable: qty });
         }
       }
     });
 
     setTickets(prev => {
-      var existingOrderRefs = new Set(prev.map(t => t.orderRef).filter(Boolean));
-      var existingFingerprints = new Set(prev.map(t => [t.event, t.date, t.section, t.seats, t.accountEmail].join("|").toLowerCase()));
-      var toAdd = newTickets.filter(t => {
-        var fp = [t.event, t.date, t.section, t.seats, t.accountEmail].join("|").toLowerCase();
-        if (existingFingerprints.has(fp)) { skipped++; return false; }
-        if (t.orderRef && !t.seats && existingOrderRefs.has(t.orderRef)) { skipped++; return false; }
+      const existingFPs = new Set(prev.map(t => [t.event, t.date, t.section, t.seats, t.accountEmail].join("|").toLowerCase()));
+      const existingORefs = new Set(prev.map(t => t.orderRef).filter(Boolean));
+      const toAdd = newTickets.filter(t => {
+        const fp = [t.event, t.date, t.section, t.seats, t.accountEmail].join("|").toLowerCase();
+        if (existingFPs.has(fp)) { skipped++; return false; }
+        if (t.orderRef && !t.seats && !t.section && existingORefs.has(t.orderRef)) { skipped++; return false; }
         return true;
       });
-      notify("Imported " + toAdd.length + " tickets" + (skipped > 0 ? " · " + skipped + " duplicates skipped" : ""));
+      notify(`Imported ${toAdd.length} tickets${skipped > 0 ? ` · ${skipped} duplicates skipped` : ""}`);
       return prev.concat(toAdd);
     });
-
     setBulkEmails([]); setBulkParsed([]); setBulkSelected({});
+    setParseProgress({ done: 0, total: 0 }); // FIX: reset progress counter
   }
 
   async function parseWithAI() {
     if (!emailText.trim()) return;
     const site = detectSite(emailText);
     if (site === "liverpool") { setParsed(parseLiverpoolEmail(emailText)[0]); return; }
-    if (!settings.openAiKey) { setParsed(parseEmail(emailText, site)); return; }
+    if (site === "ticketmaster_uk" && !settings.openAiKey) { setParsed(parseTicketmasterEmail(emailText)[0]); return; }
+    if (!settings.openAiKey) { setParsed(parseEmail(emailText)); return; }
     setAiParsing(true); setParsed(null);
     try {
-      var clean = stripEmailForAI(emailText);
-      var res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const clean = stripEmailForAI(emailText);
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + settings.openAiKey },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
-          max_tokens: 300,
-          messages: [{ role: "user", content: "Parse this ticket confirmation. Return ONLY JSON with keys: event,date,time,venue,section,row,seats,qty,costPrice,orderRef,category,accountEmail,restrictions,isStanding.\nStanding/Pitch/Floor: isStanding=true, clear section/row/seats.\nqty = total ticket count.\nrestrictions without Album Pre-Order Pre-Sale prefix.\ncostPrice from Total (incl. fee).\n\n" + clean }]
+          model: "gpt-4o-mini", max_tokens: 400, temperature: 0,
+          messages: [
+            { role: "system", content: "Extract ticket info. Return ONLY JSON: {event,date,time,venue,section,row,seats,qty,costPrice,orderRef,category,restrictions,isStanding}. costPrice=total including fees. isStanding=true for Standing/Pitch/Floor/GA. restrictions without 'Album Pre-Order Pre-Sale -' prefix." },
+            { role: "user", content: clean }
+          ]
         })
       });
-      var data = await res.json();
-      var content = data.choices?.[0]?.message?.content || "";
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || "";
       if (!res.ok) throw new Error(content || "API error");
-      var result = JSON.parse(content.replace(/```json|```/g, "").trim());
+      const result = JSON.parse(content.replace(/```json|```/g, "").trim());
       setParsed({ ...result, confidence: "high", aiParsed: true });
-    } catch(e) { notify("AI failed: " + e.message + " — using auto parser", "err"); setParsed(parseEmail(emailText)); }
+    } catch(e) {
+      notify("AI failed: " + e.message + " — using auto parser", "err");
+      setParsed(parseEmail(emailText));
+    }
     setAiParsing(false);
   }
 
-  var gmailAccounts = settings.gmailAccounts || [];
+  const gmailAccounts = settings.gmailAccounts || [];
+  const inputStyle = { background: "#fafafa", border: "0.5px solid #e5e7eb", color: "#111827", fontFamily: "Inter, sans-serif", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" };
 
   return (
     <div className="fade-up">
       <div style={{ marginBottom: 24 }}>
-        <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 24, color: "#0f172a", letterSpacing: "-0.5px" }}>Settings</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Integrations & Configuration</div>
+        <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 20, color: "#111827", letterSpacing: "-0.02em" }}>Settings</div>
+        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Integrations & Configuration</div>
       </div>
 
-      <div style={{ display: "grid", gap: 16, maxWidth: 720 }}>
+      <div style={{ display: "grid", gap: 10, maxWidth: 760 }}>
 
-        {/* Accounts */}
-        <div style={{ background: "white", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 38, height: 38, background: "#ea4335", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>✉️</div>
+        {/* ── Email Accounts ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#fff4ee", border: "0.5px solid #fde0cc", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📧</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>Email Accounts</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{gmailAccounts.length === 0 ? "No accounts added" : gmailAccounts.length + " account" + (gmailAccounts.length > 1 ? "s" : "") + " connected"}</div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Email Accounts</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>
+                {gmailAccounts.length === 0 ? "No accounts added" : `${gmailAccounts.length} account${gmailAccounts.length > 1 ? "s" : ""} connected`}
+              </div>
             </div>
           </div>
-          <div style={{ display: "flex", borderBottom: "0.5px solid #e2e6ea", background: "#fafbfc" }}>
-            {[["gmail", "📧 Gmail IMAP"], ["aycd", "⚡ AYCD Inbox"]].map(t => {
-              var active = accountsTab === t[0];
-              return <button key={t[0]} onClick={() => setAccountsTab(t[0])} style={{ padding: "10px 20px", fontSize: 12, fontWeight: active ? 700 : 500, color: active ? "#f97316" : "#64748b", background: "none", border: "none", borderBottom: active ? "2px solid #f97316" : "2px solid transparent", cursor: "pointer", fontFamily: "var(--body)", marginBottom: -1 }}>{t[1]}</button>;
+          {/* Tabs */}
+          <div style={{ display: "flex", background: "#f9f9fb", borderBottom: "0.5px solid #f0f0f3", padding: "3px 3px 0", gap: 2 }}>
+            {[["gmail", "Gmail IMAP"], ["aycd", "AYCD Inbox"]].map(([id, label]) => {
+              const active = accountsTab === id;
+              return (
+                <button key={id} onClick={() => setAccountsTab(id)} style={{ padding: "7px 16px", fontSize: 12, fontWeight: active ? 600 : 400, color: active ? "#111827" : "#9ca3af", background: active ? "white" : "none", border: active ? "0.5px solid #e8e8ec" : "none", borderBottom: active ? "0.5px solid white" : "none", borderRadius: "6px 6px 0 0", cursor: "pointer", fontFamily: "Inter, sans-serif", marginBottom: -1 }}>
+                  {label}
+                </button>
+              );
             })}
           </div>
+
           {accountsTab === "gmail" && (
             <div>
               {gmailAccounts.length > 0 && (
-                <div style={{ borderBottom: "0.5px solid #e2e6ea" }}>
+                <div style={{ borderBottom: "0.5px solid #f0f0f3" }}>
                   {gmailAccounts.map((acc, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 24px", borderBottom: i < gmailAccounts.length - 1 ? "0.5px solid #f1f4f8" : "none" }}>
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", borderBottom: i < gmailAccounts.length - 1 ? "0.5px solid #f5f5f7" : "none" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 0 2px rgba(34,197,94,0.2)", flexShrink: 0 }} />
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{acc.email}</div>
-                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>Added {acc.addedAt ? new Date(acc.addedAt).toLocaleDateString("en-GB") : "—"}</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{acc.email}</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Added {acc.addedAt ? new Date(acc.addedAt).toLocaleDateString("en-GB") : "—"}</div>
                       </div>
                       <button className="del-btn" onClick={() => removeAccount(i)}>✕</button>
                     </div>
                   ))}
                 </div>
               )}
-              <div style={{ padding: 24, display: "grid", gap: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>Add a Gmail Account</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ padding: "16px 18px", display: "grid", gap: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em" }}>Add a Gmail Account</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   <div>
-                    <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#64748b", marginBottom: 6 }}>Gmail Address</label>
-                    <input id="gmail-email-input" type="email" placeholder="you@gmail.com" style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "var(--body)", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b7280", marginBottom: 5 }}>Gmail address</label>
+                    <input id="gmail-email-input" type="email" placeholder="you@gmail.com" style={inputStyle} />
                   </div>
                   <div>
-                    <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#64748b", marginBottom: 6 }}>App Password</label>
-                    <input id="gmail-pass-input" type="password" placeholder="xxxx xxxx xxxx xxxx" style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "monospace", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b7280", marginBottom: 5 }}>App password</label>
+                    <input id="gmail-pass-input" type="password" placeholder="xxxx xxxx xxxx xxxx" style={{ ...inputStyle, fontFamily: "monospace" }} />
                   </div>
                 </div>
-                <button className="action-btn" style={{ width: "fit-content" }} onClick={addGmailAccount}>+ Add Account</button>
-                <div style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", borderRadius: 7, padding: 16, fontSize: 12, color: "#64748b", lineHeight: 1.9 }}>
-                  <b style={{ color: "#0f172a" }}>How to get a Gmail App Password:</b><br />
+                <button className="action-btn" style={{ width: "fit-content" }} onClick={addGmailAccount}>+ Add account</button>
+                <div style={{ background: "#fafafa", border: "0.5px solid #e8e8ec", borderRadius: 7, padding: "12px 14px", fontSize: 12, color: "#6b7280", lineHeight: 1.8 }}>
+                  <b style={{ color: "#111827" }}>How to get a Gmail App Password:</b><br />
                   Google Account → Security → 2-Step Verification → App Passwords → Create one named "Queud"<br />
-                  <a href="https://support.google.com/mail/answer/185833" target="_blank" rel="noreferrer" style={{ color: "#f97316", fontWeight: 700, textDecoration: "none" }}>Open Google App Passwords guide →</a>
+                  <a href="https://support.google.com/mail/answer/185833" target="_blank" rel="noreferrer" style={{ color: "#f47b20", fontWeight: 600, textDecoration: "none" }}>Open Google App Passwords guide →</a>
                 </div>
               </div>
             </div>
           )}
+
           {accountsTab === "aycd" && (
-            <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ padding: "16px 18px", display: "grid", gap: 12 }}>
               <div style={{ display: "flex", gap: 8 }}>
-                <input type="password" value={aycdApiKey} onChange={e => setAycdApiKey(e.target.value)} placeholder="Paste your AYCD API key" style={{ flex: 1, background: "#f7f8fa", border: "0.5px solid #e2e6ea", borderRadius: 7, padding: "8px 10px", fontFamily: "var(--body)", fontSize: 13, color: "#0f172a", outline: "none" }} />
-                <button onClick={saveAycdKey} style={{ background: "#1a3a6e", color: "white", border: "none", borderRadius: 7, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)" }}>Save</button>
+                <input type="password" value={aycdApiKey} onChange={e => setAycdApiKey(e.target.value)} placeholder="Paste your AYCD API key" style={inputStyle} />
+                <button onClick={saveAycdKey} className="action-btn">Save</button>
               </div>
-              {settings.aycdApiKey && <div style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>✓ API key saved</div>}
+              {settings.aycdApiKey && <div style={{ fontSize: 12, fontWeight: 600, color: "#16a34a" }}>✓ API key saved</div>}
+              <div style={{ background: "#fafafa", border: "0.5px solid #e8e8ec", borderRadius: 7, padding: "12px 14px", fontSize: 12, color: "#6b7280", lineHeight: 1.8 }}>
+                Open the AYCD Inbox desktop app → <b>Settings → Tasks (API)</b> → copy your key. The app must be open when fetching.
+              </div>
             </div>
           )}
         </div>
 
-        {/* Email Scraper */}
-        <div style={{ background: "white", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 38, height: 38, background: "#4285f4", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📥</div>
+        {/* ── Email Scraper ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#eff6ff", border: "0.5px solid #bfdbfe", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📡</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>Email Scraper</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>Search Gmail and import ticket confirmations in bulk</div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Email Scraper</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Search Gmail and import ticket confirmations in bulk</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: serverOnline === true ? "#22c55e" : serverOnline === false ? "#ef4444" : "#d1d5db" }} />
-              <span style={{ fontSize: 11, color: "#64748b" }}>{serverOnline === true ? "Server online" : serverOnline === false ? "Server offline" : "Not checked"}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#9ca3af" }}>
+                <div style={{ width: 5, height: 5, borderRadius: "50%", background: serverOnline === true ? "#22c55e" : serverOnline === false ? "#ef4444" : "#d1d5db" }} />
+                {serverOnline === true ? "Server online" : serverOnline === false ? "Server offline" : "Not checked"}
+              </div>
               <button className="ghost-btn" style={{ fontSize: 11, padding: "5px 10px" }} onClick={checkServer}>Check</button>
             </div>
           </div>
-          <div style={{ padding: 24, display: "grid", gap: 16 }}>
+
+          <div style={{ padding: "16px 18px", display: "grid", gap: 14 }}>
             {serverOnline === false && (
-              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: 14, fontSize: 12, color: "#dc2626" }}>
+              <div style={{ background: "#fef2f2", border: "0.5px solid #fecaca", borderRadius: 7, padding: 12, fontSize: 12, color: "#dc2626" }}>
                 Server not running. In your queud-server folder run: <b>node server.js</b>
               </div>
             )}
 
-            {/* 3-column filter row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase", color: "#64748b", marginBottom: 6 }}>Gmail Account</label>
-                <select value={bulkSelectedAccount} onChange={e => setBulkSelectedAccount(e.target.value)} style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "var(--body)", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b7280", marginBottom: 5 }}>Gmail account</label>
+                <select value={bulkSelectedAccount} onChange={e => setBulkSelectedAccount(e.target.value)} style={inputStyle}>
                   <option value="">Select account…</option>
                   {gmailAccounts.map(a => <option key={a.email} value={a.email}>{a.email}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase", color: "#64748b", marginBottom: 6 }}>Website</label>
-                <select value={bulkSite} onChange={e => handleSiteChange(e.target.value)} style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "var(--body)", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }}>
-                  <option value="">Select site...</option>{SITES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b7280", marginBottom: 5 }}>Website</label>
+                <select value={bulkSite} onChange={e => handleSiteChange(e.target.value)} style={inputStyle}>
+                  <option value="">Select site…</option>
+                  {SITES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase", color: "#64748b", marginBottom: 6 }}>Search Subject / Keyword</label>
-                <input value={bulkSearchTerm} onChange={e => setBulkSearchTerm(e.target.value)} placeholder="e.g. booking confirmation" style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "var(--body)", fontSize: 13, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
+                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b7280", marginBottom: 5 }}>Search keyword</label>
+                <input value={bulkSearchTerm} onChange={e => setBulkSearchTerm(e.target.value)} placeholder="e.g. booking confirmation" style={inputStyle} />
               </div>
             </div>
 
             <button className="action-btn" style={{ width: "fit-content" }} disabled={bulkFetching || !bulkSelectedAccount} onClick={fetchEmails}>
-              {bulkFetching ? "⏳ Fetching…" : "🔍 Fetch Emails"}
+              {bulkFetching ? "⏳ Fetching…" : "Fetch Emails"}
             </button>
 
             {bulkEmails.length > 0 && (
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{bulkEmails.length} emails found</div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="ghost-btn" style={{ fontSize: 11 }} onClick={() => { var all = {}; bulkEmails.forEach(e => { all[e.uid] = true; }); setBulkSelected(all); }}>Select All</button>
-                    <button className="ghost-btn" style={{ fontSize: 11 }} onClick={() => setBulkSelected({})}>Deselect All</button>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{bulkEmails.length} emails found</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => { const all = {}; bulkEmails.forEach(e => { all[e.uid] = true; }); setBulkSelected(all); }}>Select all</button>
+                    <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setBulkSelected({})}>Deselect all</button>
                   </div>
                 </div>
-                <div style={{ border: "0.5px solid #e2e6ea", borderRadius: 7, overflow: "hidden", maxHeight: 300, overflowY: "auto" }}>
+
+                <div style={{ border: "0.5px solid #e8e8ec", borderRadius: 7, overflow: "hidden", maxHeight: 280, overflowY: "auto" }}>
                   {bulkEmails.map((email, i) => (
-                    <div key={email.uid} onClick={() => setBulkSelected(s => ({ ...s, [email.uid]: !s[email.uid] }))} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderBottom: i < bulkEmails.length - 1 ? "0.5px solid #f1f4f8" : "none", cursor: "pointer", background: bulkSelected[email.uid] ? "#f0fdf4" : "white" }}>
-                      <div style={{ width: 18, height: 18, borderRadius: 4, border: "2px solid " + (bulkSelected[email.uid] ? "#f97316" : "#d1d5db"), background: bulkSelected[email.uid] ? "#f97316" : "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {bulkSelected[email.uid] && <span style={{ color: "white", fontSize: 11, fontWeight: 700 }}>✓</span>}
+                    <div key={email.uid} onClick={() => setBulkSelected(s => ({ ...s, [email.uid]: !s[email.uid] }))} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: i < bulkEmails.length - 1 ? "0.5px solid #f5f5f7" : "none", cursor: "pointer", background: bulkSelected[email.uid] ? "#fff7f0" : "white" }}>
+                      <div style={{ width: 16, height: 16, borderRadius: 4, border: "0.5px solid " + (bulkSelected[email.uid] ? "#f47b20" : "#e5e7eb"), background: bulkSelected[email.uid] ? "#f47b20" : "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {bulkSelected[email.uid] && <span style={{ color: "white", fontSize: 10, fontWeight: 700 }}>✓</span>}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.subject || "(no subject)"}</div>
-                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{email.from} · {email.date ? new Date(email.date).toLocaleDateString("en-GB") : "—"}</div>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.subject || "(no subject)"}</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>{email.from} · {email.date ? new Date(email.date).toLocaleDateString("en-GB") : "—"}</div>
                       </div>
                     </div>
                   ))}
                 </div>
-                <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+
+                <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
                   {(() => {
-                    var numSel = Object.values(bulkSelected).filter(Boolean).length;
-                    var isDone = !bulkParsing && bulkParsed.length > 0 && numSel > 0;
+                    const numSel = Object.values(bulkSelected).filter(Boolean).length;
+                    const isDone = !bulkParsing && bulkParsed.length > 0 && numSel > 0;
                     return (
-                      <button disabled={bulkParsing || numSel === 0} onClick={parseSelected}
-                        style={{ background: isDone ? "#1a3a6e" : "#f97316", color: "white", border: "none", borderRadius: 7, padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: numSel === 0 ? "not-allowed" : "pointer", fontFamily: "var(--body)", display: "inline-flex", alignItems: "center", gap: 6, opacity: numSel === 0 ? 0.5 : 1 }}>
-                        {bulkParsing ? "⏳ Parsing " + parseProgress.done + " / " + parseProgress.total + "…" : isDone ? "✅ Parsed " + bulkParsed.length + " — Parse Again" : "✨ Parse " + numSel + " Selected"}
-                      </button>
+                      <>
+                        <button disabled={bulkParsing || numSel === 0} onClick={parseSelected}
+                          style={{ background: isDone ? "#111827" : "#f47b20", color: "white", border: "none", borderRadius: 7, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: numSel === 0 ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif", display: "inline-flex", alignItems: "center", gap: 6, opacity: numSel === 0 ? 0.5 : 1 }}>
+                          {bulkParsing
+                            ? `Parsing ${parseProgress.done} / ${parseProgress.total}…`
+                            : isDone
+                            ? `✓ Parsed ${bulkParsed.length} — Parse again`
+                            : `Parse ${numSel} selected`}
+                        </button>
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>{numSel} of {bulkEmails.length} selected</span>
+                      </>
                     );
                   })()}
-                  <span style={{ fontSize: 11, color: "#64748b" }}>{Object.values(bulkSelected).filter(Boolean).length} of {bulkEmails.length} selected</span>
                 </div>
 
                 {bulkParsed.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>{bulkParsed.length} tickets ready to import</div>
-                    <div style={{ border: "0.5px solid #e2e6ea", borderRadius: 7, overflow: "hidden", maxHeight: 280, overflowY: "auto" }}>
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", marginBottom: 8 }}>{bulkParsed.length} tickets ready to import</div>
+                    <div style={{ border: "0.5px solid #e8e8ec", borderRadius: 7, overflow: "hidden", maxHeight: 260, overflowY: "auto" }}>
                       {bulkParsed.map((p, i) => {
-                        var missingPrice = !p.costPrice || p.costPrice === 0;
-                        var standing = p.isStanding || isStandingTicket(p.restrictions || "");
+                        const noPrice = !p.costPrice || p.costPrice === 0;
+                        const standing = p.isStanding || isStandingTicket(p.restrictions || "");
+                        const sym = p.originalCurrency === "GBP" ? "£" : p.originalCurrency === "EUR" ? "€" : "$";
                         return (
-                          <div key={p._uid || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderBottom: i < bulkParsed.length - 1 ? "0.5px solid #f1f4f8" : "none", background: missingPrice ? "#fffbeb" : "white" }}>
+                          <div key={p._uid || i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: i < bulkParsed.length - 1 ? "0.5px solid #f5f5f7" : "none", background: noPrice ? "#fffbeb" : "white" }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{p.event || p._subject || "Unknown"}</div>
-                              <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-                                {p.date ? "📅 " + p.date + "  " : ""}
-                                {p.venue ? "📍 " + p.venue.replace(/,.*$/, "").trim() + "  " : ""}
-                                {standing ? <span style={{ color: "#7c3aed", fontWeight: 600 }}>Standing ×{p.qty}  </span> : (p.section ? "§" + p.section + (p.row ? " Row " + p.row : "") + (p.seats ? " Seat " + p.seats : "") + "  " : "")}
-                                {p.costPrice > 0 ? "💳 " + (p.originalCurrency === "GBP" ? "£" : p.originalCurrency === "EUR" ? "€" : "$") + p.costPrice : ""}
+                              <div style={{ fontSize: 12, fontWeight: 500, color: "#111827" }}>{p.event || p._subject || "Unknown"}</div>
+                              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>
+                                {p.date ? p.date + " · " : ""}
+                                {p.venue ? p.venue.replace(/,.*$/, "").trim() + " · " : ""}
+                                {standing
+                                  ? <span style={{ color: "#7c3aed" }}>Standing ×{p.qty} · </span>
+                                  : p.section ? `Sec ${p.section}${p.row ? " Row " + p.row : ""}${p.seats ? " Seat " + p.seats : ""} · ` : ""}
+                                {p.costPrice > 0 ? sym + p.costPrice : <span style={{ color: "#ef4444" }}>No price</span>}
                               </div>
                             </div>
-                            {missingPrice && <div style={{ fontSize: 10, fontWeight: 700, color: "#d97706", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, padding: "2px 8px", flexShrink: 0 }}>⚠ No price</div>}
+                            {noPrice && <span style={{ fontSize: 10, fontWeight: 600, color: "#d97706", background: "#fef3c7", padding: "2px 7px", borderRadius: 4, flexShrink: 0 }}>⚠ No price</span>}
                           </div>
                         );
                       })}
                     </div>
-                    <button onClick={importAll} style={{ marginTop: 12, background: "#059669", color: "white", border: "none", borderRadius: 7, padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "var(--body)", display: "inline-flex", alignItems: "center", gap: 6 }}>⬆ Import {bulkParsed.length} to Inventory</button>
-                    {bulkParsed.filter(p => !p.costPrice || p.costPrice === 0).length > 0 && (
-                      <div style={{ marginTop: 8, fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 7, padding: "8px 12px" }}>
-                        ⚠ {bulkParsed.filter(p => !p.costPrice || p.costPrice === 0).length} tickets have no price — edit after importing.
-                      </div>
-                    )}
+                    <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+                      <button onClick={importAll} style={{ background: "#16a34a", color: "white", border: "none", borderRadius: 7, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+                        Import {bulkParsed.length} to Inventory
+                      </button>
+                      {bulkParsed.filter(p => !p.costPrice || p.costPrice === 0).length > 0 && (
+                        <span style={{ fontSize: 11, color: "#d97706" }}>
+                          {bulkParsed.filter(p => !p.costPrice || p.costPrice === 0).length} tickets have no price
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7, padding: 14, fontSize: 12, color: "#1e40af", lineHeight: 1.8 }}>
+            <div style={{ background: "#eff6ff", border: "0.5px solid #bfdbfe", borderRadius: 7, padding: "10px 14px", fontSize: 12, color: "#1e40af" }}>
               Requires local server. In your queud-server folder run: <b>npm install</b> then <b>node server.js</b>
             </div>
           </div>
         </div>
 
-        {/* AI */}
-        <div style={{ background: "white", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 38, height: 38, background: "#10a37f", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>✨</div>
+        {/* ── AI Email Parsing ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>✦</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>AI Email Parsing</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>Use Claude to extract ticket data (Anthropic API key)</div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>AI Email Parsing</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Use ChatGPT to extract ticket data from any email</div>
             </div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: settings.openAiKey ? "#059669" : "#64748b" }}>{settings.openAiKey ? "✓ Active" : "Not configured"}</div>
+            <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, fontWeight: 600, background: settings.openAiKey ? "#f0fdf4" : "#f5f5f7", color: settings.openAiKey ? "#16a34a" : "#9ca3af", border: settings.openAiKey ? "0.5px solid #bbf7d0" : "0.5px solid #e8e8ec" }}>
+              {settings.openAiKey ? "Active" : "Not configured"}
+            </span>
           </div>
-          <div style={{ padding: 24 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#64748b", marginBottom: 6 }}>Anthropic API Key</label>
-            <input type="password" value={settings.openAiKey || ""} onChange={e => setSettings(s => ({ ...s, openAiKey: e.target.value }))} placeholder="sk-..." style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "monospace", fontSize: 12, padding: "8px 10px", width: "100%", borderRadius: 7, outline: "none" }} />
-            <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
-              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: "#f97316", fontWeight: 700, textDecoration: "none" }}>Get your key →</a>
+          <div style={{ padding: "16px 18px" }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b7280", marginBottom: 5 }}>OpenAI API key</label>
+            <input type="password" value={settings.openAiKey || ""} onChange={e => setSettings(s => ({ ...s, openAiKey: e.target.value }))} placeholder="sk-..." style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: "0.02em" }} />
+            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>
+              Saved locally. Never shared except with OpenAI. <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: "#f47b20", fontWeight: 600, textDecoration: "none" }}>Get your key →</a>
             </div>
           </div>
         </div>
 
-        {/* Manual Email Paste */}
-        <div style={{ background: "white", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 38, height: 38, background: "#34a853", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📋</div>
+        {/* ── Manual Email Paste ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#f5f3ff", border: "0.5px solid #ddd6fe", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📋</div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>Manual Email Paste</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>Paste a full email — site is auto-detected</div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Manual Email Paste</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Paste a full email — site is auto-detected</div>
             </div>
           </div>
-          <div style={{ padding: 24, display: "grid", gap: 14 }}>
-            <textarea value={emailText} onChange={e => { setEmailText(e.target.value); setParsed(null); }} placeholder={"Paste anything here:\n• Ticketmaster UK confirmation\n• Liverpool FC Booking Confirmation\n• Any ticket email"} style={{ background: "#f7f8fa", border: "0.5px solid #e2e6ea", color: "#0f172a", fontFamily: "var(--body)", fontSize: 12, padding: 16, width: "100%", height: 140, resize: "vertical", borderRadius: 7, outline: "none", lineHeight: 1.8 }} />
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <button className="action-btn" onClick={parseWithAI}>{aiParsing ? "⏳ Parsing…" : settings.openAiKey ? "✨ Parse with AI" : "Parse Email"}</button>
+          <div style={{ padding: "16px 18px", display: "grid", gap: 12 }}>
+            <textarea value={emailText} onChange={e => { setEmailText(e.target.value); setParsed(null); }}
+              placeholder={"Paste anything here:\n• Ticketmaster UK confirmation\n• Liverpool FC Booking Confirmation\n• Any ticket email"}
+              style={{ ...inputStyle, height: 130, resize: "vertical", lineHeight: 1.7, padding: "12px 14px" }} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="action-btn" onClick={parseWithAI}>
+                {aiParsing ? "⏳ Parsing…" : settings.openAiKey ? "✦ Parse with AI" : "Parse Email"}
+              </button>
               <button className="ghost-btn" onClick={() => { setEmailText(""); setParsed(null); }}>Clear</button>
             </div>
             {parsed && (
-              <div style={{ background: "#f0fdf4", border: "2px solid #bbf7d0", padding: 18, borderRadius: 7 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-                  {[["Event", parsed.event || "Not detected"], ["Date", parsed.date || "—"], ["Venue", parsed.venue || "—"], ["Type", parsed.isStanding ? "Standing / Pitch" : "Seated"], ["Section", parsed.isStanding ? "N/A" : (parsed.section || "—")], ["Row", parsed.isStanding ? "N/A" : (parsed.row || "—")], ["Seats", parsed.isStanding ? "N/A" : (parsed.seats || "—")], ["Qty", parsed.qty || "—"], ["Cost", parsed.costPrice > 0 ? fmt(parsed.costPrice) : "—"], ["Restrictions", parsed.restrictions || "—"]].map(item => (
-                    <div key={item[0]} style={{ background: "white", padding: "8px 12px", borderRadius: 7, border: "0.5px solid #e2e6ea" }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: "#64748b", textTransform: "uppercase", marginBottom: 2 }}>{item[0]}</div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: item[1] === "Not detected" || item[1] === "—" || item[1] === "N/A" ? "#94a3b8" : "#0f172a" }}>{item[1]}</div>
+              <div style={{ background: "#f9fafb", border: "0.5px solid #e8e8ec", padding: "14px 16px", borderRadius: 7 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  {[
+                    ["Event",        parsed.event || "Not detected"],
+                    ["Date",         parsed.date || "—"],
+                    ["Venue",        parsed.venue || "—"],
+                    ["Type",         parsed.isStanding ? "Standing / Pitch" : "Seated"],
+                    ["Section",      parsed.isStanding ? "N/A" : (parsed.section || "—")],
+                    ["Row",          parsed.isStanding ? "N/A" : (parsed.row || "—")],
+                    ["Seats",        parsed.isStanding ? "N/A" : (parsed.seats || "—")],
+                    ["Qty",          parsed.qty || "—"],
+                    ["Cost",         parsed.costPrice > 0 ? "£" + parsed.costPrice : "—"],
+                    ["Restrictions", parsed.restrictions || "—"],
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ background: "white", padding: "8px 10px", borderRadius: 6, border: "0.5px solid #e8e8ec" }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9ca3af", textTransform: "uppercase", marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: ["Not detected","—","N/A"].includes(val) ? "#d1d5db" : "#111827" }}>{val}</div>
                     </div>
                   ))}
                 </div>
-                <button className="action-btn" onClick={() => { importParsed(parsed); setEmailText(""); setParsed(null); }}>Import &amp; Review →</button>
+                <button className="action-btn" onClick={() => { importParsed(parsed); setEmailText(""); setParsed(null); }}>
+                  Import &amp; Review →
+                </button>
               </div>
             )}
           </div>
         </div>
 
-        {/* Data Management */}
-        <div style={{ background: "white", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 38, height: 38, background: "#6366f1", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🗄️</div>
+        {/* ── Data Management ── */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "#f5f3ff", border: "0.5px solid #ddd6fe", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🗄️</div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>Data Management</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{tickets.length} events · {sales.length} sales stored</div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Data Management</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>{tickets.length} tickets · {sales.length} sales stored</div>
             </div>
           </div>
-          <div style={{ padding: 24, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ padding: "16px 18px", display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="ghost-btn" onClick={() => {
-              var data = { tickets, sales, exportedAt: new Date().toISOString() };
-              var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-              var url = URL.createObjectURL(blob);
-              var a = document.createElement("a"); a.href = url; a.download = "queud-backup-" + today() + ".json"; a.click();
+              const data = { tickets, sales, exportedAt: new Date().toISOString() };
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = "queud-backup-" + today() + ".json"; a.click();
               URL.revokeObjectURL(url); notify("Backup downloaded");
-            }}>⬇ Export JSON Backup</button>
+            }}>⬇ Export JSON</button>
             <button className="ghost-btn" onClick={() => {
-              var rows = [["Event","Date","Venue","Section","Row","Qty","Cost","Category","Order Ref","Restrictions"]].concat(tickets.map(t => [t.event,t.date,t.venue,t.section,t.row,t.qty,t.costPrice,t.category,t.orderRef,t.restrictions]));
-              var csv = rows.map(r => r.map(c => '"' + (c || "") + '"').join(",")).join("\n");
-              var blob = new Blob([csv], { type: "text/csv" });
-              var url = URL.createObjectURL(blob);
-              var a = document.createElement("a"); a.href = url; a.download = "queud-inventory-" + today() + ".csv"; a.click();
+              const rows = [
+                ["Event","Date","Venue","Section","Row","Seat","Qty","Cost","Category","Order Ref","Restrictions"],
+                ...tickets.map(t => [t.event,t.date,t.venue,t.section,t.row,t.seats,t.qty,t.costPrice,t.category,t.orderRef,t.restrictions])
+              ];
+              const csv = rows.map(r => r.map(c => `"${(c ?? "").toString().replace(/"/g, '""')}"`).join(",")).join("\n");
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = "queud-inventory-" + today() + ".csv"; a.click();
               URL.revokeObjectURL(url); notify("CSV downloaded");
-            }}>⬇ Export Inventory CSV</button>
+            }}>⬇ Export CSV</button>
             <button className="ghost-btn" style={{ color: "#ef4444", borderColor: "#fecaca" }} onClick={() => {
               if (window.confirm("Clear ALL data? This cannot be undone.")) {
                 setTickets([]); setSales([]); notify("All data cleared");
               }
-            }}>🗑 Clear All Data</button>
+            }}>🗑 Clear all data</button>
           </div>
         </div>
 

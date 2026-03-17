@@ -1,114 +1,199 @@
+// ── Shared HTML stripper (used by all parsers) ────────────────────────────────
+function stripHtml(html) {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<\/td>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '-')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&pound;/gi, '£')   // decode before anything else so £ signs survive
+    .replace(/&euro;/gi, '€')
+    .replace(/&bull;/gi, '·')
+    .replace(/&#xA0;/g, ' ')
+    .replace(/&#\d+;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/=C2=A3/g, '£')     // quoted-printable £
+    .replace(/=\r?\n/g, '')       // quoted-printable line continuations
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function isHtmlEmail(raw) {
+  return /<html|<body|<table|<td/i.test(raw);
+}
+
+// ── Strip email down to just the useful lines for AI ─────────────────────────
 export function stripEmailForAI(raw) {
   let body = raw;
   const contentStart = raw.search(/(?:From:|Subject:|<!doctype|<html)/im);
   if (contentStart > 0) body = raw.slice(contentStart);
+
+  // Decode HTML entities FIRST so £ signs survive the line filter
   if (/<html|<body|<table/i.test(body)) {
+    body = stripHtml(body);
+  } else {
+    // Plain text: still decode quoted-printable and entities
     body = body
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/td>/gi, ' ').replace(/<\/p>/gi, '\n')
-      .replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&mdash;/g, '—').replace(/&nbsp;/g, ' ')
-      .replace(/&pound;/gi, '£').replace(/&euro;/gi, '€').replace(/&[a-z]+;/gi, ' ')
-      .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+      .replace(/=C2=A3/g, '£')
+      .replace(/=\r?\n/g, '')
+      .replace(/=20\s*/g, ' ')
+      .replace(/&pound;/gi, '£')
+      .replace(/&euro;/gi, '€')
+      .replace(/&amp;/g, '&');
   }
+
   return body.split('\n').filter(l => {
     const t = l.trim();
-    if (!t) return false;
+    if (!t || t.length < 1) return false;
+    // Always keep lines with price/currency info — these are critical
+    if (/[£€$]\s*[\d,]+/.test(t)) return true;
+    // Always keep lines with ticket-relevant keywords
+    if (/seat|row|section|block|stand|area|venue|total|order|booking|confirm|ticket|restrict|standing|pitch/i.test(t)) return true;
+    // Drop long lines that are pure base64/hex/CSS junk
     if (t.length > 300 && !/[A-Za-z\s]{10}/.test(t)) return false;
-    if (/^\s*(\.|\{|\}|@font|@media|padding:|margin:|font-size:|background:|border:|color:)/.test(t)) return false;
+    // Drop CSS property lines (more specific than before — require lowercase only)
+    if (/^\s*(?:padding|margin|font-size|background|border-radius|display|width|height|color|text-align)\s*:/i.test(t)) return false;
+    // Drop CSS at-rules and selectors
+    if (/^\s*(?:@font|@media|\{|\}|\.)/.test(t)) return false;
+    // Drop URLs longer than 80 chars (tracking pixels etc)
+    if (/^https?:\/\/\S{80,}$/.test(t)) return false;
     return true;
   }).join('\n').substring(0, 6000);
 }
 
+// ── Standing ticket detection ─────────────────────────────────────────────────
 export function isStandingTicket(text) {
-  return /\b(standing|pitch|floor|general admission|ga\b|lawn|infield|festival|rear pitch|front pitch)/i.test(text || '');
+  return /\b(standing|pitch standing|rear pitch|front pitch|general admission|ga\b|lawn|infield|festival floor)\b/i.test(text || '');
 }
 
-// ── Detect which site sent the email ────────────────────────────────────────
+// ── Site detection ────────────────────────────────────────────────────────────
 export function detectSite(raw) {
   if (/liverpoolfc\.com|@fans\.emails\.liverpoolfc|Liverpool FC Booking Confirmation/i.test(raw)) return 'liverpool';
-  if (/ticketmaster\.co\.uk|email\.ticketmaster/i.test(raw)) return 'ticketmaster_uk';
+  if (/ticketmaster\.co\.uk|email\.ticketmaster\.co\.uk/i.test(raw)) return 'ticketmaster_uk';
   if (/ticketmaster\.com/i.test(raw)) return 'ticketmaster_us';
+  if (/axs\.com|@axs\.com|AXS Tickets/i.test(raw)) return 'axs';
+  if (/seetickets\.com|@seetickets/i.test(raw)) return 'seetickets';
+  if (/eticketing\.co\.uk/i.test(raw)) return 'eticketing';
   return 'generic';
 }
 
-// ── Liverpool FC parser ──────────────────────────────────────────────────────
-// Returns an ARRAY of tickets (one per supporter/seat in the email)
-export function parseLiverpoolEmail(raw) {
-  const stripHtml = (html) => html
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/td>/gi, ' ').replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&pound;/gi, '£')
-    .replace(/&#xA0;/g, ' ').replace(/&#\d+;/g, ' ').replace(/&[a-z]+;/gi, ' ')
-    .replace(/=C2=A3/g, '£').replace(/=\r?\n/g, '') // decode quoted-printable
-    .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+// ── Extract cost — shared helper ──────────────────────────────────────────────
+// Tries multiple patterns in priority order, returns the most reliable value
+function extractCost(text) {
+  // Priority 1: "Total (incl. fee) £XX" — most reliable
+  const totalInclFee = text.match(/Total\s*\(incl\.?\s*fee[s]?\)[^\n£€$]*[£€$]\s*([\d,]+\.?\d*)/i);
+  if (totalInclFee) return parseFloat(totalInclFee[1].replace(/,/g, ''));
 
-  const isHtml = /<html|<body|<table/i.test(raw);
-  const text = isHtml ? stripHtml(raw) : raw
+  // Priority 2: "Total Charge £XX"
+  const totalCharge = text.match(/Total\s+(?:Charge|Amount|Due)[^\n£€$]{0,20}[£€$]\s*([\d,]+\.?\d*)/i);
+  if (totalCharge) return parseFloat(totalCharge[1].replace(/,/g, ''));
+
+  // Priority 3: "Total Paid £XX" (Liverpool FC)
+  const totalPaid = text.match(/Total\s+Paid[^\n£€$]{0,10}[£€$]\s*([\d,]+\.?\d*)/i);
+  if (totalPaid) return parseFloat(totalPaid[1].replace(/,/g, ''));
+
+  // Priority 4: "Order Total £XX" / "Grand Total £XX"
+  const orderTotal = text.match(/(?:Order|Grand|Booking)\s+Total[^\n£€$]{0,20}[£€$]\s*([\d,]+\.?\d*)/i);
+  if (orderTotal) return parseFloat(orderTotal[1].replace(/,/g, ''));
+
+  // Priority 5: "Amount Paid £XX"
+  const amountPaid = text.match(/Amount\s+(?:Paid|Charged)[^\n£€$]{0,10}[£€$]\s*([\d,]+\.?\d*)/i);
+  if (amountPaid) return parseFloat(amountPaid[1].replace(/,/g, ''));
+
+  // Fallback: largest £ amount in reasonable range (5–5000)
+  const amounts = [];
+  for (const m of text.matchAll(/[£€$]\s*([\d,]+\.?\d*)/g)) {
+    const v = parseFloat(m[1].replace(/,/g, ''));
+    if (v >= 5 && v <= 5000) amounts.push(v);
+  }
+  return amounts.length > 0 ? Math.max(...amounts) : 0;
+}
+
+// ── Extract order ref — shared helper ─────────────────────────────────────────
+function extractOrderRef(text) {
+  const patterns = [
+    /Order\s*[#№]\s*([A-Z0-9\-\/]{4,25})/i,
+    /(?:Order|Booking|Confirmation|Reference)\s*(?:Number|No\.?|Ref\.?)[:\s]*([A-Z0-9\-\/]{4,25})/i,
+    /(?:Ref|Booking)[:\s]+([A-Z0-9\-\/]{6,25})/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return m[1].trim().substring(0, 25);
+  }
+  return '';
+}
+
+// ── Detect sport vs concert ───────────────────────────────────────────────────
+function detectCategory(text) {
+  return /\b(?:match|fixture|vs\.?|kick.?off|premier league|championship|fa cup|league cup|nfl|nba|mlb|nhl|ufc|boxing|cricket|rugby|tennis|golf)\b/i.test(text)
+    ? 'Sport' : 'Concert';
+}
+
+// ── Liverpool FC parser ───────────────────────────────────────────────────────
+// Returns ARRAY of tickets — one per seat
+export function parseLiverpoolEmail(raw) {
+  const text = isHtmlEmail(raw) ? stripHtml(raw) : raw
     .replace(/=C2=A3/g, '£')
     .replace(/=\r?\n/g, '')
     .replace(/=20\s*/g, ' ');
 
-  // Event: "Liverpool v West Ham United - Sat 28 Feb 2026 KO: 15:00"
-  const eventMatch = text.match(/Liverpool\s+v\s+[^\n\r\-]{3,40}\s*[-–]\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[^\n\r]{5,40})/i);
-  const event = eventMatch
-    ? ('Liverpool v ' + text.match(/Liverpool\s+v\s+([^\n\r\-]{3,40})/i)?.[1]?.trim() + ' - ' + eventMatch[1].trim()).substring(0, 60)
+  // Event name: "Liverpool v West Ham United - Sat 28 Feb 2026 KO: 15:00"
+  const opponentMatch = text.match(/Liverpool\s+v\s+([^\n\r\-]{3,40})/i);
+  const dateLineMatch = text.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}\s+\w+\s+\d{4})/i);
+  const opponent = opponentMatch ? opponentMatch[1].trim().replace(/\s+[-–].*$/, '').trim() : null;
+  const event = opponent
+    ? `Liverpool v ${opponent}`.substring(0, 60)
     : 'Liverpool FC';
 
-  // Date & KO time from event line
-  const dateMatch = text.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}\s+\w+\s+\d{4})/i);
+  const date = dateLineMatch ? dateLineMatch[1].trim() : '';
   const koMatch = text.match(/KO[:\s]+(\d{1,2}:\d{2})/i);
-  const date = dateMatch ? dateMatch[1].trim() : '';
   const time = koMatch ? koMatch[1] : '';
+  const orderRef = extractOrderRef(text);
+  const totalPaid = extractCost(text);
 
-  // Total paid
-  const totalMatch = text.match(/Total Paid[:\s]*£([\d.]+)/i);
-  const totalPaid = totalMatch ? parseFloat(totalMatch[1]) : 0;
-
-  // Parse each ticket block — LFC format:
-  // Stand: Sir Kenny Dalglish Stand Lower Tier
-  // Area: KP / Row: 12 / Seat: 244
-  // Severely Restricted View (optional)
-  // £52.00 Adult
   const tickets = [];
 
-  // Split by "Stand:" occurrences to get individual ticket blocks
+  // Primary: split by "Stand:" blocks
   const blocks = text.split(/(?=\bStand:)/i);
-  // Also try splitting by "Area:" if Stand: not present
   const splitBlocks = blocks.length > 1 ? blocks : text.split(/(?=\bArea:)/i);
 
   splitBlocks.forEach(block => {
     if (!/Area:|Row:|Seat:/i.test(block)) return;
 
     const standMatch = block.match(/Stand:\s*([^\n\r/]{3,60})/i);
-    const areaMatch = block.match(/Area:\s*([A-Z0-9]+)/i);
-    const rowMatch = block.match(/Row:\s*(\d+)/i);
-    const seatMatch = block.match(/Seat:\s*(\d+)/i);
-    const priceMatch = block.match(/£([\d.]+)/);
-    const restrictionMatch = block.match(/(Severely Restricted View|Restricted View|Restricted Side View|Partial View|Obstructed View)/i);
+    const areaMatch  = block.match(/Area:\s*([A-Z0-9]+)/i);
+    const rowMatch   = block.match(/Row:\s*(\d+)/i);
+    const seatMatch  = block.match(/Seat:\s*(\d+)/i);
 
-    const section = areaMatch ? areaMatch[1].trim() : '';
-    const row = rowMatch ? rowMatch[1].trim() : '';
+    // Price: look for £XX.XX specifically — skip pence-only values
+    const priceMatches = [...block.matchAll(/£\s*([\d]+\.[\d]{2})/g)]
+      .map(m => parseFloat(m[1]))
+      .filter(v => v >= 5 && v < 1000);
+    const costPrice = priceMatches.length > 0 ? priceMatches[0] : 0;
+
+    const restrictionMatch = block.match(/(Severely Restricted View|Restricted View|Restricted Side View|Partial View|Obstructed View|Limited View)/i);
+
+    const row  = rowMatch  ? rowMatch[1].trim()  : '';
     const seat = seatMatch ? seatMatch[1].trim() : '';
-    const costPrice = priceMatch ? parseFloat(priceMatch[1]) : 0;
-    const restrictions = restrictionMatch ? restrictionMatch[1].trim() : '';
-    const stand = standMatch ? standMatch[1].trim().replace(/\s+/g, ' ') : '';
 
     if (row || seat) {
       tickets.push({
-        event,
-        date,
-        time,
+        event, date, time,
         venue: 'Anfield Stadium, Liverpool',
-        section,
-        row,
-        seats: seat,
+        section:      areaMatch         ? areaMatch[1].trim()                     : '',
+        row, seats: seat,
         qty: 1,
-        costPrice,
-        orderRef: '',
-        restrictions,
-        notes: stand,
+        costPrice:    costPrice > 0 ? costPrice : (totalPaid > 0 ? totalPaid : 0),
+        orderRef,
+        restrictions: restrictionMatch  ? restrictionMatch[1].trim()              : '',
+        notes:        standMatch        ? standMatch[1].trim().replace(/\s+/g, ' ') : '',
         isStanding: false,
         category: 'Sport',
         confidence: 'high',
@@ -116,229 +201,263 @@ export function parseLiverpoolEmail(raw) {
     }
   });
 
-  // If we got nothing from block parsing, try flat regex
+  // Secondary: flat "Area: KP / Row: 12 / Seat: 244" inline pattern
   if (tickets.length === 0) {
     const areaMatches = [...text.matchAll(/Area:\s*([A-Z0-9]+)\s*\/\s*Row:\s*(\d+)\s*\/\s*Seat:\s*(\d+)/gi)];
-    const priceMatches = [...text.matchAll(/£([\d.]+)/g)].map(m => parseFloat(m[1])).filter(v => v > 5 && v < 500);
-
+    const priceMatches = [...text.matchAll(/£\s*([\d]+\.[\d]{2})/g)]
+      .map(m => parseFloat(m[1]))
+      .filter(v => v >= 5 && v < 1000);
     areaMatches.forEach((m, i) => {
       tickets.push({
         event, date, time,
         venue: 'Anfield Stadium, Liverpool',
-        section: m[1].trim(),
-        row: m[2].trim(),
-        seats: m[3].trim(),
+        section: m[1].trim(), row: m[2].trim(), seats: m[3].trim(),
         qty: 1,
-        costPrice: priceMatches[i] || (totalPaid / Math.max(areaMatches.length, 1)),
-        orderRef: '',
-        restrictions: '',
-        isStanding: false,
-        category: 'Sport',
-        confidence: 'high',
+        costPrice: priceMatches[i] ?? (totalPaid > 0 ? totalPaid / Math.max(areaMatches.length, 1) : 0),
+        orderRef, restrictions: '', isStanding: false,
+        category: 'Sport', confidence: 'high',
       });
     });
   }
 
-  // Fallback: single ticket with total
+  // Fallback: single record
   if (tickets.length === 0) {
     tickets.push({
       event, date, time,
       venue: 'Anfield Stadium, Liverpool',
       section: '', row: '', seats: '',
-      qty: 1,
-      costPrice: totalPaid,
-      orderRef: '',
-      restrictions: '',
-      isStanding: false,
-      category: 'Sport',
-      confidence: 'medium',
+      qty: 1, costPrice: totalPaid, orderRef,
+      restrictions: '', isStanding: false,
+      category: 'Sport', confidence: 'medium',
     });
+  }
+
+  // If we found multiple seats, divide totalPaid evenly if per-seat cost is 0
+  if (tickets.length > 1) {
+    const missingPrice = tickets.filter(t => t.costPrice === 0);
+    if (missingPrice.length === tickets.length && totalPaid > 0) {
+      const perSeat = parseFloat((totalPaid / tickets.length).toFixed(2));
+      tickets.forEach(t => { t.costPrice = perSeat; });
+    }
   }
 
   return tickets;
 }
 
-
-// ── Ticketmaster UK parser ───────────────────────────────────────────────────
-// Returns ARRAY of tickets — one per seat block found in email
+// ── Ticketmaster UK parser ────────────────────────────────────────────────────
+// Returns ARRAY of tickets — one per seat
 export function parseTicketmasterEmail(raw) {
-  const stripHtml = (html) => html
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/td>/gi, ' ').replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&pound;/gi, '£')
-    .replace(/&bull;/gi, '·').replace(/&mdash;/g, '—').replace(/&#\d+;/g, ' ').replace(/&[a-z]+;/gi, ' ')
-    .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  const text = isHtmlEmail(raw) ? stripHtml(raw) : raw;
 
-  const isHtml = /<html|<body|<table|<td/i.test(raw);
-  const text = isHtml ? stripHtml(raw) : raw;
-
-  // ── Event name ──
+  // Event name: strip all known Ticketmaster subject wrappers
   const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
   const subject = subjectMatch ? subjectMatch[1].trim() : '';
-  let event = subject
-    .replace(/^you're in!\s+your\s+/i, '')
-    .replace(/\s+ticket confirmation\s*$/i, '')
-    .trim().substring(0, 60);
-  if (!event) {
-    const bodyEventMatch = text.match(/HARRY STYLES[^\n\r]{0,50}|([A-Z][A-Z\s:,&]{8,50}(?:TOGETHER|TOUR|STADIUM|ARENA))/);
-    if (bodyEventMatch) event = (bodyEventMatch[0] || bodyEventMatch[1] || '').trim().substring(0, 60);
+
+  function cleanTMSubject(s) {
+    return s
+      .replace(/^you're in!\s*/i, '')
+      .replace(/^your\s+/i, '')
+      .replace(/\s+tickets?\s+confirmation\s*$/i, '')
+      .replace(/\s+confirmation\s*$/i, '')
+      .trim()
+      .substring(0, 60);
   }
 
-  // ── Date/time ──
+  let event = subject ? cleanTMSubject(subject) : '';
+
+  // Fallback: all-caps event name line in body
+  if (!event) {
+    const capsMatch = text.match(/\n([A-Z][A-Z0-9\s:,&'\-!.]{8,60})\n/);
+    if (capsMatch) event = capsMatch[1].trim().substring(0, 60);
+  }
+
+  // Date & time
   const dateMatch = text.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i);
   const timeMatch = text.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
   const date = dateMatch ? dateMatch[1].trim() : '';
   const time = timeMatch ? timeMatch[1].trim() : '';
 
-  // ── Venue ──
-  const venueMatch = text.match(/([A-Z][a-zA-Z\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome))\s*(?:,\s*[A-Za-z]+)?/i);
-  const venue = venueMatch ? venueMatch[0].replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 50) : '';
+  // Venue
+  const venueMatch = text.match(/([A-Z][a-zA-Z\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater))\s*(?:,\s*[A-Za-z\s]+)?/i);
+  const venue = venueMatch
+    ? venueMatch[0].split(',')[0].replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 50)
+    : '';
 
-  // ── Order ref ──
-  const orderRefMatch = text.match(/Order\s*#\s*([A-Z0-9\-\/]+)/i);
-  const orderRef = orderRefMatch ? orderRefMatch[1].substring(0, 25) : '';
+  const orderRef  = extractOrderRef(text);
+  const totalCost = extractCost(text);
+  const category  = detectCategory(text);
 
-  // ── Total cost ──
-  const totalMatch = text.match(/Total\s*\(incl\.?\s*fee\)[^\n£$]*[£$]\s*([\d,]+\.?\d*)/i);
-  const totalCost = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : 0;
+  // Standing detection
+  // "Unreserved Standing" / "Pitch Standing" can appear as the TICKET TYPE NAME on a
+  // seated ticket (e.g. "Album Pre-Order Pre-Sale - Unreserved Standing" is a restriction
+  // label, not proof the ticket is standing). Only treat as standing when there is NO
+  // section/row/seat structure in the email at all.
+  const hasSeatStructure = /(?:Sec(?:tion)?|Block)\s*\d+|Row\s*\d+|\bSeat[s]?\s*\d+/i.test(text);
 
-  // ── Detect standing ──
-  const standingMatch = text.match(/(?:Album Pre-Order Pre-Sale\s*-\s*)?([^\n\r]{3,60}(?:Rear Pitch Standing|Front Pitch Standing|Pitch Standing|General Standing|Standing)[^\n\r]{0,40})/i);
-  const isStanding = !!standingMatch || isStandingTicket(text.substring(0, 1000));
+  const standingTypeMatch = text.match(
+    /(?:Album Pre-Order Pre-Sale\s*[-–]\s*)?([^\n\r]{3,80}(?:Rear Pitch Standing|Front Pitch Standing|Pitch Standing|General Standing|Unreserved Standing|Standing Only|Front GA\s*\w*\s*Standing|Rear GA\s*\w*\s*Standing|GA\s*\w*\s*Standing|Floor Standing|General Admission)[^\n\r]{0,40})/i
+  );
+
+  // Also try to extract standing type from the ticket "extra info" line in the order summary
+  // e.g. "Front GA South Standing" appears as a standalone line after the ticket type
+  const extraInfoStandingMatch = !standingTypeMatch && text.match(
+    /^([A-Z][a-zA-Z\s]*(Standing|General Admission|GA\b)[a-zA-Z\s]*)$/m
+  );
+
+  // Only flag as standing if explicit standing type found AND no seat structure present
+  const isStanding = !hasSeatStructure && (
+    !!standingTypeMatch ||
+    isStandingTicket(text.substring(0, 500))
+  );
 
   if (isStanding) {
     const mobileMatch = text.match(/(\d+)\s*x\s*(?:Mobile\s*)?Ticket/i);
     const qty = mobileMatch ? parseInt(mobileMatch[1]) : 1;
-    const restrictions = standingMatch
-      ? standingMatch[1].replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, '').trim().substring(0, 80)
-      : 'Standing Ticket';
-    return [{
-      event, date, time, venue, section: '', row: '', seats: '',
-      qty, costPrice: totalCost, orderRef, restrictions,
-      isStanding: true, category: 'Concert', confidence: 'high',
-    }];
+    const restrictions = standingTypeMatch
+      ? standingTypeMatch[1].replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, '').trim().substring(0, 80)
+      : extraInfoStandingMatch
+        ? extraInfoStandingMatch[1].trim().substring(0, 80)
+        : 'Standing Ticket';
+    // Return one record per ticket so each can be sold individually
+    const costPerTicket = parseFloat((totalCost / qty).toFixed(2));
+    return Array.from({ length: qty }, (_, i) => ({
+      event, date, time, venue,
+      section: restrictions || 'Standing', row: '', seats: String(i + 1),
+      qty: 1, costPrice: costPerTicket, orderRef, restrictions,
+      isStanding: true, category, confidence: 'high',
+    }));
   }
 
-  // ── Seated: find all Sec/Row/Seat blocks ──
-  // Ticketmaster body has pattern: "Sec 519 · Row 30 · Seats 185–186" or "Section 519 Row 30 Seat 185"
+  // Seated — find all Sec/Row/Seat blocks
   const tickets = [];
 
-  // Try "Sec X · Row Y · Seats A-B" or "Sec X · Row Y · Seat N" inline format
-  const inlinePattern = /Sec(?:tion)?\s*(\d+)[\s·,]+Row\s*(\d+)[\s·,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
-  let m;
-  while ((m = inlinePattern.exec(text)) !== null) {
-    const sec = m[1].trim();
-    const row = m[2].trim();
-    const seatStr = m[3].trim();
-    // Parse seat range or list
-    const rangeM = seatStr.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+  // Pattern 1: inline "Sec 519 · Row 30 · Seats 185–186"
+  // Also handles no-row case: "Sec 517 · Seats 93–94"
+  const inlineWithRow    = /Sec(?:tion)?\s*(\d+)[\s·•,]+Row\s*(\d+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
+  const inlineWithoutRow = /Sec(?:tion)?\s*(\d+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
+
+  function pushSeats(sec, row, seatStr) {
+    const rangeM = seatStr.trim().match(/^(\d+)\s*[-–]\s*(\d+)$/);
     if (rangeM) {
       const lo = Math.min(parseInt(rangeM[1]), parseInt(rangeM[2]));
       const hi = Math.max(parseInt(rangeM[1]), parseInt(rangeM[2]));
-      for (let s = lo; s <= hi; s++) {
-        tickets.push({ section: sec, row, seats: String(s) });
-      }
+      for (let s = lo; s <= hi; s++) tickets.push({ section: sec, row, seats: String(s) });
     } else {
-      const seatNums = seatStr.split(/[,\s]+/).filter(s => /^\d+$/.test(s.trim()));
-      seatNums.forEach(s => tickets.push({ section: sec, row, seats: s.trim() }));
+      seatStr.split(/[,\s]+/).filter(s => /^\d+$/.test(s.trim()))
+        .forEach(s => tickets.push({ section: sec, row, seats: s.trim() }));
     }
   }
 
-  // If no inline pattern found, try block-style (each ticket on its own lines)
-  if (tickets.length === 0) {
-    // Match: "Section: 519\nRow: 30\nSeat: 185"
-    const blocks = text.split(/(?=Section:|Sec:|Block:)/i);
-    blocks.forEach(block => {
-      const secM = block.match(/(?:Sec(?:tion)?|Block)[:\s]+(\d+)/i);
-      const rowM = block.match(/Row[:\s]+(\d+)/i);
-      const seatM = block.match(/Seat[s]?[:\s]+([\d,\-–\s]+)/i);
-      if (secM && (rowM || seatM)) {
-        const seatStr = seatM ? seatM[1].trim() : '';
-        const rangeM2 = seatStr.match(/^(\d+)\s*[-–]\s*(\d+)$/);
-        if (rangeM2) {
-          const lo = Math.min(parseInt(rangeM2[1]), parseInt(rangeM2[2]));
-          const hi = Math.max(parseInt(rangeM2[1]), parseInt(rangeM2[2]));
-          for (let s = lo; s <= hi; s++) tickets.push({ section: secM[1], row: rowM ? rowM[1] : '', seats: String(s) });
-        } else {
-          const nums = seatStr.split(/[,\s]+/).filter(s => /^\d+$/.test(s.trim()));
-          if (nums.length > 0) nums.forEach(s => tickets.push({ section: secM[1], row: rowM ? rowM[1] : '', seats: s.trim() }));
-          else tickets.push({ section: secM[1], row: rowM ? rowM[1] : '', seats: seatStr });
-        }
-      }
-    });
+  let m;
+  // Try with-row pattern first
+  while ((m = inlineWithRow.exec(text)) !== null) {
+    pushSeats(m[1].trim(), m[2].trim(), m[3]);
   }
 
-  // Distribute cost evenly across seats
-  const costPerSeat = tickets.length > 0 ? parseFloat((totalCost / tickets.length).toFixed(2)) : totalCost;
+  // For any sections not already captured, try without-row pattern
+  if (tickets.length === 0) {
+    while ((m = inlineWithoutRow.exec(text)) !== null) {
+      // Make sure this isn't already captured by the with-row pattern
+      pushSeats(m[1].trim(), '', m[2]);
+    }
+  }
+
+  // Pattern 2: block-style — label and value may be on separate lines
+  // Handles both "Section: 519" inline AND "Section\n519" label-above-value layouts
+  // Uses a single global regex that matches all Section/Row/Seat groups in the text
+  if (tickets.length === 0) {
+    const blockPat = /(?:Sec(?:tion)?|Block)\s*:?\s*[\r\n\s]*(\d+)(?:[\s\S]*?Row\s*:?\s*[\r\n\s]*(\d+))?[\s\S]*?Seat[s]?\s*:?\s*[\r\n\s]*([\d\s,\-\u2013]+)/gi;
+    let bm;
+    while ((bm = blockPat.exec(text)) !== null) {
+      pushSeats(bm[1].trim(), bm[2]?.trim() ?? '', bm[3]);
+    }
+  }
+
+  // Pattern 3: run-together text "Sec 520Row 30Seats 185–186" (no separator)
+  if (tickets.length === 0) {
+    const runTogether = /Sec(?:tion)?\s*(\d+)\s*(?:Row\s*(\d+)\s*)?Seat[s]?\s*([\d\-–]+)/gi;
+    while ((m = runTogether.exec(text)) !== null) {
+      pushSeats(m[1].trim(), m[2]?.trim() ?? '', m[3]);
+    }
+  }
 
   if (tickets.length > 0) {
+    const costPerSeat = parseFloat((totalCost / tickets.length).toFixed(2));
+
+    // Extract view restriction from ticket type label
+    // e.g. "Album Pre-Order Pre-Sale - Restricted View Aisle Seated Ticket"
+    const ticketLabelMatch = text.match(/((?:Severely\s+)?Restricted(?:\s+Side)?\s+View(?:\s+\w+){0,4}|Limited\s+View(?:\s+\w+){0,3}|Partial\s+View(?:\s+\w+){0,3}|Obstructed\s+View(?:\s+\w+){0,3})/i);
+    const viewRestriction = ticketLabelMatch
+      ? ticketLabelMatch[1].replace(/\s*(?:Aisle\s*)?Seated\s*Ticket\s*$/i, '').replace(/\s*Ticket\s*$/i, '').trim().substring(0, 60)
+      : '';
+
     return tickets.map(t => ({
       event, date, time, venue,
       section: t.section, row: t.row, seats: t.seats,
       qty: 1, costPrice: costPerSeat, orderRef,
-      restrictions: '', isStanding: false, category: 'Concert', confidence: 'high',
+      restrictions: viewRestriction, isStanding: false, category, confidence: 'high',
     }));
   }
 
-  // Fallback: single record
+  // Fallback — couldn't find seat structure, return single record flagged as low confidence
+  // These are likely VIP/hospitality packages or unusual formats
   return [{
     event, date, time, venue,
     section: '', row: '', seats: '',
     qty: 1, costPrice: totalCost, orderRef,
-    restrictions: '', isStanding: false, category: 'Concert', confidence: 'medium',
+    restrictions: totalCost > 500 ? 'Possible VIP/Hospitality — check manually' : '',
+    isStanding: false, category,
+    confidence: totalCost > 0 ? 'medium' : 'low',
   }];
 }
 
-// ── Generic / Ticketmaster parser ────────────────────────────────────────────
+// ── Generic parser ────────────────────────────────────────────────────────────
 export function parseEmail(raw, site) {
-  // Route to site-specific parser if known
   const detectedSite = site || detectSite(raw);
-  if (detectedSite === 'liverpool') {
-    // Return first ticket for single-ticket flow; bulk uses parseLiverpoolEmail
-    return parseLiverpoolEmail(raw)[0];
-  }
+  if (detectedSite === 'liverpool')      return parseLiverpoolEmail(raw)[0];
+  if (detectedSite === 'ticketmaster_uk') return parseTicketmasterEmail(raw)[0];
 
-  const stripHtml = (html) => html
-    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/td>/gi, ' ').replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&mdash;/g, '—').replace(/&ndash;/g, '-')
-    .replace(/&nbsp;/g, ' ').replace(/&pound;/gi, '£').replace(/&euro;/gi, '€').replace(/&#\d+;/g, ' ').replace(/&[a-z]+;/gi, ' ')
-    .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-
-  const trimmed = raw.trim();
-  if (trimmed.length < 200 && trimmed.split('\n').length <= 3) {
-    let event = trimmed
-      .replace(/^(?:You Got Tickets? To|Your Tickets? For|Booking Confirmation[:\s\-—]*|Order Confirmed[:\s\-—]*)/i, '')
-      .replace(/\s*[-—|]\s*Order.*$/i, '').replace(/\s*[-—|]\s*\d.*$/, '')
-      .trim().substring(0, 60);
-    const isSport = /(?:vs?\.?|fc |united|city|f\.c\.|stadium|ground|nfl|nba|ufc)/i.test(trimmed);
-    return { event, date: '', time: '', venue: '', section: '', row: '', seats: '', qty: 1, costPrice: 0, orderRef: '', category: isSport ? 'Sport' : 'Concert', isStanding: false, confidence: event ? 'medium' : 'low' };
-  }
-
-  const isHtml = /<html|<body|<table|<td/i.test(raw);
-  const text = isHtml ? stripHtml(raw) : raw;
-  const find = (patterns) => { for (const p of patterns) { const m = text.match(p); if (m) return (m[1] || m[0])?.trim().replace(/\s+/g, ' '); } return ''; };
+  const text = isHtmlEmail(raw) ? stripHtml(raw) : raw;
+  const find = (patterns) => {
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m) return (m[1] ?? m[0])?.trim().replace(/\s+/g, ' ') ?? '';
+    }
+    return '';
+  };
 
   const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
   const subject = subjectMatch ? subjectMatch[1].trim() : '';
 
+  // Short subject-only inputs (manual paste of just event name)
+  const trimmed = raw.trim();
+  if (trimmed.length < 200 && trimmed.split('\n').length <= 3) {
+    const event = trimmed
+      .replace(/^(?:You Got Tickets?\s+To|Your Tickets?\s+For|Booking Confirmation[:\s\-—]*|Order Confirmed[:\s\-—]*)/i, '')
+      .replace(/\s*[-—|]\s*Order.*$/i, '')
+      .replace(/\s*[-—|]\s*\d.*$/, '')
+      .trim().substring(0, 60);
+    return { event, date: '', time: '', venue: '', section: '', row: '', seats: '', qty: 1, costPrice: 0, orderRef: '', category: detectCategory(trimmed), isStanding: false, confidence: event ? 'medium' : 'low' };
+  }
+
   const event = find([
-    // Ticketmaster UK: "You're in! Your HARRY STYLES: TOGETHER, TOGETHER ticket confirmation"
     /You're in!\s+Your\s+(.+?)\s+ticket confirmation/i,
-    // Event name appears as all-caps line after "You got the tickets" in body
     /You got the tickets[\s\S]{0,50}\n\s*([A-Z][A-Z\s:,]+)/,
     /You Got Tickets To\s+([^\n\r<]+)/i,
-    /Subject:.*?(?:tickets? to|tickets? for)\s+([^\n\r]+)/i,
+    /Subject:.*?(?:tickets?\s+to|tickets?\s+for)\s+([^\n\r]+)/i,
     /(?:event|show|concert|match|game|fixture)[:\s]+([^\n\r<]{3,60})/i,
-    /(?:your tickets? (?:for|to))[:\s]+([^\n\r<]{3,60})/i,
+    /(?:your tickets?\s+(?:for|to))[:\s]+([^\n\r<]{3,60})/i,
     /([A-Z][a-zA-Z\s]+ vs?\.? [A-Z][a-zA-Z\s]+)/,
     /tickets to\s+([^\n\r<]{3,60})/i,
-  ]) || (subject
-    .replace(/^you're in!\s+your\s+/i, '')
-    .replace(/\s+ticket confirmation\s*$/i, '')
-    .replace(/^(you got tickets!?|booking confirmation[:\s-]*|order confirmed[:\s-]*)/i, '')
-    .trim().substring(0, 60) || '');
+  ]) || subject
+      .replace(/^you're in!\s*/i, '')
+      .replace(/^your\s+/i, '')
+      .replace(/\s+tickets?\s+confirmation\s*$/i, '')
+      .replace(/\s+confirmation\s*$/i, '')
+      .replace(/^(?:you got tickets!?|booking confirmation[:\s-]*|order confirmed[:\s-]*)/i, '')
+      .trim().substring(0, 60) || '';
 
+  // Date — clean up leading " · " if no date found
   const dateRaw = find([
     /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s*[·•\-]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/i,
     /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/i,
@@ -346,91 +465,91 @@ export function parseEmail(raw, site) {
     /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i,
     /(?:date|when|on)[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
   ]);
-  const time = find([
+  const timeStr = find([
     /[·•]\s*(\d{1,2}:\d{2}\s*(?:AM|PM|pm|am))/i,
     /(?:doors?|kick[- ]?off|start|gates?|showtime)[:\s]+(\d{1,2}[:.]\d{2}\s*(?:am|pm)?)/i,
-    /(\d{1,2}:\d{2}\s*(?:AM|PM))/,
+    /\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b/,
     /\b(\d{1,2}:\d{2}\s*pm)\b/i,
   ]);
-  const date = dateRaw + (time && !dateRaw.includes(time) ? ` · ${time}` : '');
+  // FIX: avoid " · 7:30pm" when no date found
+  const date = dateRaw
+    ? (timeStr && !dateRaw.includes(timeStr) ? `${dateRaw} · ${timeStr}` : dateRaw)
+    : '';
 
-  const venue = find([
-    /([A-Z][a-zA-Z\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Theater|Theatre|Field|Dome|Bowl|Coliseum))\s*(?:,\s*[A-Za-z]+)?/i,
+  // Venue — trim greedily-matched content
+  const venueRaw = find([
+    /([A-Z][a-zA-Z\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Theater|Theatre|Field|Dome|Bowl|Coliseum))\s*(?:,\s*[A-Za-z\s]+)?/i,
     /(?:venue|location|at)[:\s]+([^\n\r<,]{5,50})/i,
-  ])?.replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 50) || '';
+  ]);
+  const venue = venueRaw
+    ? venueRaw.split(',')[0].replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 50)
+    : '';
 
-  // Qty
+  // Qty — raised cap for standing/festival orders
   let qty = 1;
-  const mobileMatch = text.match(/(\d+)\s*x\s*(?:Mobile\s*)?Ticket/i);
-  const qtyMatch = text.match(/(?:qty|quantity)[:\s]+(\d+)/i);
-  const seatRangeMatch = text.match(/Seat[s]?\s*(\d+)\s*[-–]\s*(\d+)/i);
-  const ticketsCountMatch = text.match(/(\d+)\s*(?:x\s*)?(?:adult |general |standing |seated )?tickets?\b/i);
-  if (mobileMatch) qty = parseInt(mobileMatch[1]);
-  else if (qtyMatch) qty = parseInt(qtyMatch[1]);
+  const mobileMatch       = text.match(/(\d+)\s*x\s*(?:Mobile\s*)?Ticket/i);
+  const qtyMatch          = text.match(/(?:qty|quantity)[:\s]+(\d+)/i);
+  const seatRangeMatch    = text.match(/Seat[s]?\s*(\d+)\s*[-–]\s*(\d+)/i);
+  const ticketsCountMatch = text.match(/(\d+)\s*(?:x\s*)?(?:adult\s|general\s|standing\s|seated\s)?tickets?\b/i);
+  if (mobileMatch)        qty = parseInt(mobileMatch[1]);
+  else if (qtyMatch)      qty = parseInt(qtyMatch[1]);
   else if (seatRangeMatch) qty = Math.abs(parseInt(seatRangeMatch[2]) - parseInt(seatRangeMatch[1])) + 1;
   else if (ticketsCountMatch) qty = parseInt(ticketsCountMatch[1]);
   if (isNaN(qty) || qty < 1) qty = 1;
-  if (qty > 20) qty = 20;
+  if (qty > 100) qty = 100; // raised cap for large standing orders
 
   // Section / Row / Seat
   let section = '', row = '', seats = '';
   const secRowSeatMatch = text.match(/Sec(?:tion)?\s*([\w\d]+)[,·\s]+Row\s*([\w\d]+)[,·\s]+Seat[s]?\s*([\d\s,\-–]+)/i);
   if (secRowSeatMatch) {
     section = secRowSeatMatch[1].trim();
-    row = secRowSeatMatch[2].trim();
-    seats = secRowSeatMatch[3].trim();
+    row     = secRowSeatMatch[2].trim();
+    seats   = secRowSeatMatch[3].trim();
   } else {
     const secMatch = text.match(/(?:Sec(?:tion)?|Block)[:\s]+([\w\d]+)/i);
     if (secMatch) section = secMatch[1].trim();
     const rowMatch = text.match(/\bRow\s+([\w\d]{1,4})\b/i);
     if (rowMatch) row = rowMatch[1].trim();
     if (seatRangeMatch) {
-      const s1 = parseInt(seatRangeMatch[1]), s2 = parseInt(seatRangeMatch[2]);
-      const lo = Math.min(s1, s2), hi = Math.max(s1, s2);
-      seats = Array.from({ length: hi - lo + 1 }, (_, i) => (lo + i).toString()).join(', ');
+      const lo = Math.min(parseInt(seatRangeMatch[1]), parseInt(seatRangeMatch[2]));
+      const hi = Math.max(parseInt(seatRangeMatch[1]), parseInt(seatRangeMatch[2]));
+      seats = Array.from({ length: hi - lo + 1 }, (_, i) => String(lo + i)).join(', ');
     } else {
       const seatListMatch = text.match(/Seat[s]?\s*([\d]+(?:\s*,\s*[\d]+)+)/i);
       if (seatListMatch) seats = seatListMatch[1].trim();
-      else { const singleSeatMatch = text.match(/\bSeat\s+(\d+)\b/i); if (singleSeatMatch) seats = singleSeatMatch[1].trim(); }
+      else {
+        const singleSeatMatch = text.match(/\bSeat\s+(\d+)\b/i);
+        if (singleSeatMatch) seats = singleSeatMatch[1].trim();
+      }
     }
   }
 
+  // Standing — only flag if explicit type found, not just "standing" in venue names
   const ticketTypeMatch = text.match(/(?:Album Pre-Order Pre-Sale\s*-?\s*)?([^\n\r]{5,60}(?:Standing|Pitch|Floor|General Admission|GA|Lawn|Infield|Festival)[^\n\r]{0,40})/i);
   const ticketType = ticketTypeMatch ? ticketTypeMatch[1].trim() : '';
-  const standing = isStandingTicket(ticketType) || isStandingTicket(text.substring(0, 500));
+  const standing   = isStandingTicket(ticketType) || (isStandingTicket(text.substring(0, 500)) && !section && !row);
   if (standing) { section = ''; row = ''; seats = ''; }
 
-  let costPrice = 0;
-  const totalInclFeeMatch = text.match(/Total\s*\(incl\.?\s*fee\)[^\n£$]*[£$]\s*([\d,]+\.?\d*)/i);
-  if (totalInclFeeMatch) {
-    costPrice = parseFloat(totalInclFeeMatch[1].replace(/,/g, ''));
-  } else {
-    const allAmounts = [];
-    for (const m of text.matchAll(/£\s*([\d,]+\.?\d*)/g)) {
-      const v = parseFloat(m[1].replace(/,/g, ''));
-      if (v >= 5 && v <= 5000) allAmounts.push(v);
-    }
-    if (allAmounts.length > 0) costPrice = Math.max(...allAmounts);
-  }
+  const costPrice = extractCost(text);
+  const orderRef  = extractOrderRef(text);
 
-  const orderRef = find([
-    /Order\s*#\s*([A-Z0-9\-\/]+)/i,
-    /(?:order|booking|confirmation|reference)\s*(?:number|#|no\.?)[:\s]*([A-Z0-9\-\/]+)/i,
-  ])?.substring(0, 25) || '';
-
-  const isSport = /(?:match|fixture|vs\.?|stadium|ground|kick.?off|premier league|championship|nfl|nba|mlb|nhl|ufc|boxing|cricket|rugby)/i.test(text);
-
-  let restrictions = ticketType.replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, '').replace(/^Pre-Sale\s*[-–]\s*/i, '').trim().substring(0, 80);
+  let restrictions = ticketType
+    .replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, '')
+    .replace(/^Pre-Sale\s*[-–]\s*/i, '')
+    .trim().substring(0, 80);
   if (!restrictions) {
-    restrictions = find([/(?:restricted|limited|obstructed|side view|rear|standing|hospitality|vip|accessible|wheelchair|partial view)[^\n\r<]{0,60}/i])?.trim().substring(0, 80) || '';
+    restrictions = find([
+      /(?:restricted|limited|obstructed|side view|rear|hospitality|vip|accessible|wheelchair|partial view)[^\n\r<]{0,60}/i,
+    ])?.trim().substring(0, 80) ?? '';
   }
 
   return {
-    event: event?.substring(0, 60).replace(/\s+/g, ' ').trim() || '',
-    date: date?.trim() || '', time: time || '', venue,
-    section, row, seats, qty, costPrice, orderRef, restrictions,
-    isStanding: standing,
-    category: isSport ? 'Sport' : 'Concert',
-    confidence: (event && (date || venue)) ? 'high' : event ? 'medium' : 'low',
+    event:       event?.substring(0, 60).replace(/\s+/g, ' ').trim() ?? '',
+    date:        date?.trim() ?? '',
+    time:        timeStr ?? '',
+    venue, section, row, seats, qty, costPrice, orderRef, restrictions,
+    isStanding:  standing,
+    category:    detectCategory(text),
+    confidence:  (event && (date || venue)) ? 'high' : event ? 'medium' : 'low',
   };
 }
