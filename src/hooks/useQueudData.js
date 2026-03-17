@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 // ── Tickets ──────────────────────────────────────────────────────────────────
@@ -107,6 +107,8 @@ function saleToDb(s) {
 
 // ── Main hook ────────────────────────────────────────────────────────────────
 
+const POLL_INTERVAL_MS = 30_000; // 30 seconds
+
 export function useQueudData() {
   const [tickets, setTicketsState] = useState([]);
   const [sales, setSalesState] = useState([]);
@@ -114,12 +116,20 @@ export function useQueudData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Load all data on mount
+  // Track last-seen IDs so polling only applies server-side changes,
+  // not local mutations the user just made
+  const localMutationIds = useRef(new Set()); // IDs mutated locally this session
+
+  // ── Initial load ────────────────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const [{ data: t, error: te }, { data: s, error: se }, { data: st, error: ste }] = await Promise.all([
+        const [
+          { data: t, error: te },
+          { data: s, error: se },
+          { data: st, error: ste },
+        ] = await Promise.all([
           supabase.from('tickets').select('*').order('added_at', { ascending: false }),
           supabase.from('sales').select('*').order('recorded_at', { ascending: false }),
           supabase.from('settings').select('*').eq('id', 'user_settings').single(),
@@ -128,7 +138,13 @@ export function useQueudData() {
         if (se) throw se;
         setTicketsState((t || []).map(dbToTicket));
         setSalesState((s || []).map(dbToSale));
-        if (st) setSettingsState({ gmailAccounts: st.gmail_accounts || [], openAiKey: st.open_ai_key || '', aycdApiKey: st.aycd_api_key || '' });
+        if (st) {
+          setSettingsState({
+            gmailAccounts: st.gmail_accounts || [],
+            openAiKey: st.open_ai_key || '',
+            aycdApiKey: st.aycd_api_key || '',
+          });
+        }
       } catch (e) {
         console.error('Load error:', e);
         setError(e.message);
@@ -138,25 +154,90 @@ export function useQueudData() {
     load();
   }, []);
 
-  // ── Tickets ──────────────────────────────────────────────────────────────
+  // ── Background polling — picks up server-synced sales & ticket status changes ──
+  // Runs every 30s. Only updates state for records that are NEW (not in current
+  // state) or whose status has changed by the server (not a local mutation).
+  useEffect(() => {
+    if (loading) return; // don't start polling until initial load is done
+
+    const interval = setInterval(async () => {
+      try {
+        const [{ data: t }, { data: s }] = await Promise.all([
+          supabase.from('tickets').select('*').order('added_at', { ascending: false }),
+          supabase.from('sales').select('*').order('recorded_at', { ascending: false }),
+        ]);
+
+        if (t) {
+          setTicketsState(prev => {
+            const prevMap = new Map(prev.map(x => [x.id, x]));
+            const incoming = (t || []).map(dbToTicket);
+            let changed = false;
+            const merged = incoming.map(row => {
+              const existing = prevMap.get(row.id);
+              if (!existing) { changed = true; return row; } // new ticket from server
+              // Only apply server status if this wasn't mutated locally this session
+              if (!localMutationIds.current.has(row.id) && existing.status !== row.status) {
+                changed = true;
+                return { ...existing, status: row.status, qtyAvailable: row.qtyAvailable };
+              }
+              return existing; // keep local version
+            });
+            // Also keep any local-only tickets not yet persisted (shouldn't happen but safe)
+            const incomingIds = new Set(incoming.map(r => r.id));
+            prev.filter(p => !incomingIds.has(p.id)).forEach(p => { merged.push(p); changed = true; });
+            return changed ? merged : prev;
+          });
+        }
+
+        if (s) {
+          setSalesState(prev => {
+            const prevIds = new Set(prev.map(x => x.id));
+            const incoming = (s || []).map(dbToSale);
+            const newSales = incoming.filter(r => !prevIds.has(r.id));
+            // Also check for status upgrades on existing sales (e.g. Pending → Delivered)
+            const upgraded = incoming.filter(r => {
+              if (!prevIds.has(r.id)) return false;
+              const existing = prev.find(p => p.id === r.id);
+              return existing && existing.saleStatus !== r.saleStatus && !localMutationIds.current.has(r.id);
+            });
+            if (newSales.length === 0 && upgraded.length === 0) return prev;
+            const upgradedIds = new Set(upgraded.map(r => r.id));
+            return [
+              ...prev.filter(p => !upgradedIds.has(p.id)),
+              ...upgraded,
+              ...newSales,
+            ].sort((a, b) => new Date(b.recordedAt || 0) - new Date(a.recordedAt || 0));
+          });
+        }
+      } catch (e) {
+        // Polling errors are non-fatal — just log
+        console.warn('[poll] Supabase poll error:', e.message);
+      }
+    }, POLL_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  // ── Tickets ────────────────────────────────────────────────────────────────
 
   const setTickets = useCallback(async (updater) => {
     setTicketsState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
 
-      // Find added/updated tickets
       const prevIds = new Set(prev.map(t => t.id));
       const nextIds = new Set(next.map(t => t.id));
 
-      // Upsert new or changed
       const toUpsert = next.filter(t => {
         if (!prevIds.has(t.id)) return true;
         const old = prev.find(p => p.id === t.id);
         return JSON.stringify(t) !== JSON.stringify(old);
       });
 
-      // Delete removed
       const toDelete = [...prevIds].filter(id => !nextIds.has(id));
+
+      // Mark locally mutated IDs so polling doesn't overwrite them
+      toUpsert.forEach(t => localMutationIds.current.add(t.id));
+      toDelete.forEach(id => localMutationIds.current.delete(id));
 
       if (toUpsert.length > 0) {
         supabase.from('tickets').upsert(toUpsert.map(ticketToDb)).then(({ error }) => {
@@ -173,7 +254,7 @@ export function useQueudData() {
     });
   }, []);
 
-  // ── Sales ────────────────────────────────────────────────────────────────
+  // ── Sales ──────────────────────────────────────────────────────────────────
 
   const setSales = useCallback(async (updater) => {
     setSalesState(prev => {
@@ -182,8 +263,16 @@ export function useQueudData() {
       const prevIds = new Set(prev.map(s => s.id));
       const nextIds = new Set(next.map(s => s.id));
 
-      const toUpsert = next.filter(s => !prevIds.has(s.id));
+      // Upsert new records AND status changes (e.g. user manually changed status)
+      const toUpsert = next.filter(s => {
+        if (!prevIds.has(s.id)) return true;
+        const old = prev.find(p => p.id === s.id);
+        return old && old.saleStatus !== s.saleStatus;
+      });
       const toDelete = [...prevIds].filter(id => !nextIds.has(id));
+
+      toUpsert.forEach(s => localMutationIds.current.add(s.id));
+      toDelete.forEach(id => localMutationIds.current.delete(id));
 
       if (toUpsert.length > 0) {
         supabase.from('sales').upsert(toUpsert.map(saleToDb)).then(({ error }) => {
@@ -200,7 +289,7 @@ export function useQueudData() {
     });
   }, []);
 
-  // ── Settings ─────────────────────────────────────────────────────────────
+  // ── Settings ───────────────────────────────────────────────────────────────
 
   const setSettings = useCallback((updater) => {
     setSettingsState(prev => {

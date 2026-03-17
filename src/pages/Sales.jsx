@@ -12,15 +12,37 @@ const STATUS_STYLES = {
 };
 
 const PLATFORM_COLORS = {
-  Viagogo:              "#1a3a6e",
-  Tixstock:             "#059669",
-  Lysted:               "#7c3aed",
-  StubHub:              "#f97316",
-  Viagogo:              "#1a3a6e",
-  "Ticketmaster Resale":"#ef4444",
-  "AXS Official Resale":"#0ea5e9",
-  Default:              "#64748b",
+  Viagogo:               "#1a3a6e",
+  Tixstock:              "#059669",
+  Lysted:                "#7c3aed",
+  StubHub:               "#f97316",
+  "Ticketmaster Resale": "#ef4444",
+  "AXS Official Resale": "#0ea5e9",
+  Default:               "#64748b",
 };
+
+// ── Normalise a sale record regardless of snake_case (DB) or camelCase (frontend) ──
+function normSale(s) {
+  return {
+    id:          s.id,
+    eventName:   s.eventName   || s.event_name  || "Unknown Event",
+    category:    s.category    || "Concert",
+    platform:    s.platform    || "",
+    qtySold:     s.qtySold     ?? s.qty_sold     ?? 1,
+    salePrice:   s.salePrice   ?? s.sale_price   ?? 0,
+    fees:        s.fees        ?? 0,
+    costPer:     s.costPer     ?? s.cost_per     ?? 0,
+    profit:      s.profit      ?? ((s.salePrice ?? s.sale_price ?? 0) * (s.qtySold ?? s.qty_sold ?? 1)) - (s.fees ?? 0) - ((s.costPer ?? s.cost_per ?? 0) * (s.qtySold ?? s.qty_sold ?? 1)),
+    saleStatus:  s.saleStatus  || s.sale_status  || "Pending",
+    date:        s.date        || "",
+    notes:       s.notes       || "",
+    ticketId:    s.ticketId    || s.ticket_id    || null,
+    ticketIds:   s.ticketIds   || s.ticket_ids   || [],
+    section:     s.section     || "",
+    row:         s.row         || "",
+    seats:       s.seats       || "",
+  };
+}
 
 function StatusPill({ status, onChange }) {
   const s = STATUS_STYLES[status] || STATUS_STYLES.Pending;
@@ -45,45 +67,69 @@ function PlatformBadge({ platform }) {
   );
 }
 
-export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
+export default function Sales({ tickets, sales, setSales, updateSale, setShowAddSale }) {
   const [expandedEvents, setExpandedEvents] = useState({});
-  const [filterStatus, setFilterStatus] = useState("All");
+  const [filterStatus, setFilterStatus]     = useState("All");
   const [filterPlatform, setFilterPlatform] = useState("All");
+  const [selected, setSelected]             = useState(new Set()); // ids for mass delete
 
-  const totalRevenue = sales.reduce((a, s) => a + (s.salePrice * s.qtySold), 0);
-  const totalFees    = sales.reduce((a, s) => a + (s.fees || 0), 0);
-  const totalCost    = sales.reduce((a, s) => a + (s.costPer * s.qtySold), 0);
+  const normed = useMemo(() => sales.map(normSale), [sales]);
+
+  const totalRevenue = normed.reduce((a, s) => a + (s.salePrice * s.qtySold), 0);
+  const totalFees    = normed.reduce((a, s) => a + s.fees, 0);
+  const totalCost    = normed.reduce((a, s) => a + (s.costPer * s.qtySold), 0);
   const totalProfit  = totalRevenue - totalFees - totalCost;
   const totalROI     = totalCost > 0 ? ((totalProfit / totalCost) * 100) : 0;
-  const totalQty     = sales.reduce((a, s) => a + s.qtySold, 0);
+  const totalQty     = normed.reduce((a, s) => a + s.qtySold, 0);
 
   const eventGroups = useMemo(() => {
-    const filtered = sales.filter(s => {
-      if (filterStatus !== "All" && (s.saleStatus || "Pending") !== filterStatus) return false;
+    const filtered = normed.filter(s => {
+      if (filterStatus !== "All" && s.saleStatus !== filterStatus) return false;
       if (filterPlatform !== "All" && s.platform !== filterPlatform) return false;
       return true;
     });
     const groups = {};
     filtered.forEach(s => {
-      const key = s.eventName || "Unknown Event";
+      const key = s.eventName;
       if (!groups[key]) groups[key] = { eventName: key, category: s.category, sales: [], revenue: 0, fees: 0, cost: 0 };
       groups[key].sales.push(s);
       groups[key].revenue += s.salePrice * s.qtySold;
-      groups[key].fees    += s.fees || 0;
+      groups[key].fees    += s.fees;
       groups[key].cost    += s.costPer * s.qtySold;
     });
     return Object.values(groups).sort((a, b) => b.revenue - a.revenue);
-  }, [sales, filterStatus, filterPlatform]);
+  }, [normed, filterStatus, filterPlatform]);
 
-  const allPlatforms = [...new Set(sales.map(s => s.platform).filter(Boolean))];
+  const allPlatforms = [...new Set(normed.map(s => s.platform).filter(Boolean))];
 
-  const updateSaleStatus = (saleId, v) =>
-    setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: v } : s));
+  const updateSaleStatus = (saleId, v) => {
+    if (updateSale) updateSale(saleId, { sale_status: v, saleStatus: v });
+    else setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: v, sale_status: v } : s));
+  };
 
   const deleteSale = (saleId, e) => {
     e.stopPropagation();
     if (!window.confirm("Delete this sale record?")) return;
     setSales(prev => prev.filter(s => s.id !== saleId));
+    setSelected(prev => { const n = new Set(prev); n.delete(saleId); return n; });
+  };
+
+  const toggleSelect = (id, e) => {
+    e.stopPropagation();
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+
+  const toggleSelectAll = () => {
+    const allIds = normed.map(s => s.id);
+    if (selected.size === allIds.length) setSelected(new Set());
+    else setSelected(new Set(allIds));
+  };
+
+  const massDelete = () => {
+    if (!selected.size) return;
+    if (!window.confirm(`Delete ${selected.size} sale${selected.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setSales(prev => prev.filter(s => !selected.has(s.id)));
+    setSelected(new Set());
   };
 
   const kpis = [
@@ -97,23 +143,43 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
   return (
     <div className="fade-up">
 
-      {/* Header — matches Dashboard */}
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 24, color: "#0f172a", lineHeight: 1, letterSpacing: "-0.5px" }}>Sales</div>
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Track revenue, profit and sale status</div>
         </div>
-        <button className="action-btn" onClick={() => setShowAddSale(true)}>+ Record Sale</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {selected.size > 0 && (
+            <button onClick={massDelete}
+              style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "var(--body)" }}>
+              🗑 Delete {selected.size} selected
+            </button>
+          )}
+          <button className="action-btn" onClick={() => setShowAddSale(true)}>+ Record Sale</button>
+        </div>
       </div>
 
-      {/* KPI strip — same KpiCard as Dashboard */}
+      {/* KPI strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 18 }}>
         {kpis.map(k => <KpiCard key={k.label} {...k} />)}
       </div>
 
-      {/* Filter bar — matches Inventory */}
+      {/* Filter bar */}
       {sales.length > 0 && (
         <div style={{ background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+          {/* Select all checkbox */}
+          <div onClick={toggleSelectAll} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 8px", borderRadius: 6, border: "0.5px solid #e2e6ea", background: selected.size > 0 ? "rgba(239,68,68,0.06)" : "#fafafa" }}>
+            <div style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${selected.size > 0 ? "#ef4444" : "#d1d5db"}`, background: selected.size === normed.length && normed.length > 0 ? "#ef4444" : "white", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {selected.size === normed.length && normed.length > 0 && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
+              {selected.size > 0 && selected.size < normed.length && <span style={{ color: "#ef4444", fontSize: 9, fontWeight: 700 }}>–</span>}
+            </div>
+            <span style={{ fontSize: 11, color: selected.size > 0 ? "#ef4444" : "#64748b", fontWeight: 500 }}>
+              {selected.size > 0 ? `${selected.size} selected` : "Select all"}
+            </span>
+          </div>
+
+          <div style={{ width: 1, height: 16, background: "#e2e6ea" }} />
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>Status</span>
           <div style={{ display: "flex", gap: 4 }}>
             {["All", ...Object.keys(STATUS_STYLES)].map(s => {
@@ -148,9 +214,8 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
 
       {/* Table */}
       <div style={{ ...card, overflow: "hidden" }}>
-        {/* Column headers */}
-        <div style={{ display: "grid", gridTemplateColumns: "24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "9px 18px", borderBottom: "0.5px solid #e2e6ea", background: "#fafafa" }}>
-          {["", "Event", "Platform", "Qty", "Revenue", "Fees", "Profit", "Status", ""].map((h, i) => (
+        <div style={{ display: "grid", gridTemplateColumns: "32px 24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "9px 18px", borderBottom: "0.5px solid #e2e6ea", background: "#fafafa" }}>
+          {["", "", "Event", "Platform", "Qty", "Revenue", "Fees", "Profit", "Status", ""].map((h, i) => (
             <div key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#94a3b8" }}>{h}</div>
           ))}
         </div>
@@ -171,6 +236,19 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
           const qtySold = group.sales.reduce((a, s) => a + s.qtySold, 0);
           const accent = group.category === "Sport" ? "#1a3a6e" : "#7c3aed";
           const platforms = [...new Set(group.sales.map(s => s.platform).filter(Boolean))];
+          const groupIds = group.sales.map(s => s.id);
+          const allGroupSelected = groupIds.every(id => selected.has(id));
+          const someGroupSelected = groupIds.some(id => selected.has(id));
+
+          const toggleGroup = (e) => {
+            e.stopPropagation();
+            setSelected(prev => {
+              const n = new Set(prev);
+              if (allGroupSelected) groupIds.forEach(id => n.delete(id));
+              else groupIds.forEach(id => n.add(id));
+              return n;
+            });
+          };
 
           return (
             <div key={group.eventName} style={{ borderBottom: gi < eventGroups.length - 1 ? "0.5px solid #f1f4f8" : "none" }}>
@@ -179,8 +257,16 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
               <div
                 className="hover-row"
                 onClick={() => setExpandedEvents(s => ({ ...s, [group.eventName]: !s[group.eventName] }))}
-                style={{ display: "grid", gridTemplateColumns: "24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "12px 18px", alignItems: "center", cursor: "pointer", background: isExpanded ? "#fafafa" : "white", borderLeft: `3px solid ${accent}`, transition: "background 0.1s" }}
+                style={{ display: "grid", gridTemplateColumns: "32px 24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "12px 18px", alignItems: "center", cursor: "pointer", background: isExpanded ? "#fafafa" : "white", borderLeft: `3px solid ${accent}`, transition: "background 0.1s" }}
               >
+                {/* Group checkbox */}
+                <div onClick={toggleGroup} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${someGroupSelected ? "#ef4444" : "#d1d5db"}`, background: allGroupSelected ? "#ef4444" : "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                    {allGroupSelected && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                    {!allGroupSelected && someGroupSelected && <span style={{ color: "#ef4444", fontSize: 9, fontWeight: 700 }}>–</span>}
+                  </div>
+                </div>
+
                 <div style={{ fontSize: 12, color: "#94a3b8", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s", textAlign: "center" }}>›</div>
 
                 <div>
@@ -209,20 +295,38 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
               {/* Individual sale rows */}
               {isExpanded && group.sales.map((s, si) => {
                 const ticket = tickets.find(t => t.id === s.ticketId);
-                const sProfit = (s.salePrice * s.qtySold) - (s.fees || 0) - (s.costPer * s.qtySold);
-                const saleStatus = s.saleStatus || "Pending";
+                const sProfit = (s.salePrice * s.qtySold) - s.fees - (s.costPer * s.qtySold);
                 const isStanding = ticket && /standing|pitch|floor|ga/i.test(ticket.section || "");
+                const isSelected = selected.has(s.id);
 
                 return (
-                  <div key={s.id} style={{ display: "grid", gridTemplateColumns: "24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "10px 18px 10px 40px", alignItems: "center", background: si % 2 === 0 ? "#fafafa" : "#f7f8fa", borderTop: "0.5px solid #f1f4f8" }}>
+                  <div key={s.id} style={{ display: "grid", gridTemplateColumns: "32px 24px 2fr 1fr 60px 90px 80px 90px 130px 34px", gap: 0, padding: "10px 18px 10px 18px", alignItems: "center", background: isSelected ? "rgba(239,68,68,0.04)" : si % 2 === 0 ? "#fafafa" : "#f7f8fa", borderTop: "0.5px solid #f1f4f8" }}>
 
-                    {/* Indent line */}
+                    {/* Row checkbox */}
+                    <div onClick={e => toggleSelect(s.id, e)} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <div style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSelected ? "#ef4444" : "#d1d5db"}`, background: isSelected ? "#ef4444" : "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        {isSelected && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                      </div>
+                    </div>
+
                     <div style={{ width: 2, height: 24, background: "#e2e6ea", borderRadius: 2, margin: "0 auto" }} />
 
-                    {/* Seat info */}
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-                        {ticket ? (
+                        {s.section || s.row || s.seats ? (
+                          <>
+                            {s.section && (
+                              <span style={{ background: isStanding ? "#f0fdfa" : "#eef2ff", color: isStanding ? "#0f766e" : "#1a3a6e", border: `1px solid ${isStanding ? "#99f6e4" : "#c7d2fe"}`, borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 600 }}>
+                                {isStanding ? s.section : `Sec ${s.section}`}
+                              </span>
+                            )}
+                            {s.row && <span style={{ fontSize: 11, color: "#64748b" }}>Row {s.row}</span>}
+                            {s.seats && <span style={{ fontSize: 11, color: "#64748b" }}>· Seat{s.seats.includes(",") ? "s" : ""} {s.seats}</span>}
+                            {s.qtySold > 1 && !s.seats && (
+                              <span style={{ background: "rgba(249,115,22,0.1)", color: "#f97316", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>{s.qtySold}×</span>
+                            )}
+                          </>
+                        ) : ticket ? (
                           <>
                             {ticket.section && (
                               <span style={{ background: isStanding ? "#f0fdfa" : "#eef2ff", color: isStanding ? "#0f766e" : "#1a3a6e", border: `1px solid ${isStanding ? "#99f6e4" : "#c7d2fe"}`, borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 600 }}>
@@ -230,14 +334,7 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
                               </span>
                             )}
                             {ticket.row && <span style={{ fontSize: 11, color: "#64748b" }}>Row {ticket.row}</span>}
-                            {(s.seats || ticket.seats) && (
-                              <span style={{ fontSize: 11, color: "#64748b" }}>
-                                · Seat{(s.seats || ticket.seats || "").includes(",") ? "s" : ""} {s.seats || ticket.seats}
-                              </span>
-                            )}
-                            {s.qtySold > 1 && !s.seats && (
-                              <span style={{ background: "rgba(249,115,22,0.1)", color: "#f97316", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>{s.qtySold}×</span>
-                            )}
+                            {ticket.seats && <span style={{ fontSize: 11, color: "#64748b" }}>· Seat {ticket.seats}</span>}
                           </>
                         ) : (
                           <span style={{ color: "#94a3b8", fontSize: 11 }}>Ticket removed</span>
@@ -249,7 +346,6 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
                     </div>
 
                     <div><PlatformBadge platform={s.platform} /></div>
-
                     <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums" }}>{s.qtySold}×</div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", fontVariantNumeric: "tabular-nums" }}>{fmt(s.salePrice * s.qtySold)}</div>
                     <div style={{ fontSize: 12, color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>{s.fees > 0 ? fmt(s.fees) : "—"}</div>
@@ -257,9 +353,8 @@ export default function Sales({ tickets, sales, setSales, setShowAddSale }) {
                       {sProfit >= 0 ? "+" : ""}{fmt(sProfit)}
                     </div>
 
-                    <StatusPill status={saleStatus} onChange={v => updateSaleStatus(s.id, v)} />
+                    <StatusPill status={s.saleStatus} onChange={v => updateSaleStatus(s.id, v)} />
 
-                    {/* Delete */}
                     <button
                       onClick={e => deleteSale(s.id, e)}
                       title="Delete sale"

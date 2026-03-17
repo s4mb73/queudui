@@ -8,13 +8,13 @@ import { AddTicketModal, RecordSaleModal } from "./components/Modals";
 import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
 import Sales from "./pages/Sales";
-import Settings from "./pages/Settings";
+import Settings from "./pages/Settings/index";
 
 const BLANK_TICKET = { event: "", category: "Concert", subtype: "", date: "", time: "", venue: "", section: "", row: "", seats: "", qty: 2, costPrice: "", orderRef: "", notes: "", accountEmail: "", originalCurrency: "USD", originalAmount: "", exchangeRate: 1, status: "Unsold", restrictions: "" };
 const BLANK_SALE = { ticketId: "", qtySold: 1, salePrice: "", platform: "StubHub", date: today(), fees: "", notes: "" };
 
 export default function App() {
-  const { tickets, setTickets, sales, setSales, settings, setSettings, loading, error } = useQueudData();
+  const { tickets, setTickets, sales, setSales, updateSale, settings, setSettings, loading, error } = useQueudData();
   const [view, setView] = useState("dashboard");
   const [toast, setToast] = useState(null);
   const [migrated, setMigrated] = useState(false);
@@ -196,8 +196,8 @@ export default function App() {
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
           {view === "dashboard" && <Dashboard tickets={tickets} sales={sales} setView={setView} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} />}
           {view === "inventory" && <Inventory tickets={tickets} setTickets={setTickets} sales={sales} setSales={setSales} settings={settings} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} openSale={openSale} notify={notify} />}
-          {view === "sales" && <Sales tickets={tickets} sales={sales} setSales={setSales} setShowAddSale={setShowAddSale} />}
-          {view === "settings" && <Settings settings={settings} setSettings={setSettings} tickets={tickets} setTickets={setTickets} sales={sales} notify={notify} importParsed={importParsed} />}
+          {view === "sales" && <Sales tickets={tickets} sales={sales} setSales={setSales} updateSale={updateSale} setShowAddSale={setShowAddSale} />}
+          {view === "settings" && <Settings settings={settings} setSettings={setSettings} tickets={tickets} setTickets={setTickets} sales={sales} setSales={setSales} notify={notify} importParsed={importParsed} />}
         </div>
       </div>
 
