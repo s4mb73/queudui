@@ -24,13 +24,24 @@ export default function SalesPlatforms({ settings, setSettings, gmailAccounts, i
       .catch(() => setServerUp(false));
   }
 
+  // ── Read/write platform connections via settings.extra ─────────────────────
+  // Platform connections are stored in extra, not as top-level settings keys,
+  // because the settings table only has gmail_accounts + extra (jsonb).
   function getConn(platformId) {
-    return settings[`salesPlatform_${platformId}`] || { email: "", connected: false };
+    const key = `salesPlatform_${platformId}`;
+    return (settings.extra || {})[key] || { email: "", connected: false };
   }
 
   function setConn(platformId, patch) {
     const key = `salesPlatform_${platformId}`;
-    setSettings(s => ({ ...s, [key]: { ...getConn(platformId), ...patch } }));
+    const current = getConn(platformId);
+    setSettings(s => ({
+      ...s,
+      extra: {
+        ...(s.extra || {}),
+        [key]: { ...current, ...patch },
+      },
+    }));
   }
 
   async function connectPlatform(platform) {
@@ -39,9 +50,7 @@ export default function SalesPlatforms({ settings, setSettings, gmailAccounts, i
 
     setSyncing(s => ({ ...s, [platform.id]: true }));
     try {
-      // Save connected state first so server can read it from Supabase
       setConn(platform.id, { connected: true });
-      // Small delay for Supabase write to propagate
       await new Promise(r => setTimeout(r, 800));
 
       const res = await fetch(`${SERVER}/sync-sales`, {
@@ -166,17 +175,17 @@ export default function SalesPlatforms({ settings, setSettings, gmailAccounts, i
                   {isConnected ? (
                     <>
                       <button onClick={() => syncNow(platform)} disabled={isSyncing || !serverUp}
-                        style={{ background: isSyncing ? "#f0fdf4" : `${platform.color}14`, color: isSyncing ? "#9ca3af" : platform.color, border: `1px solid ${platform.color}28`, borderRadius: 7, padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: isSyncing ? "not-allowed" : "pointer", fontFamily: "var(--body)", whiteSpace: "nowrap" }}>
+                        style={{ background: isSyncing ? "#f0fdf4" : `${platform.color}14`, color: isSyncing ? "#9ca3af" : platform.color, border: `1px solid ${platform.color}28`, borderRadius: 7, padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: isSyncing ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
                         {isSyncing ? "⏳ Syncing…" : "↻ Sync now"}
                       </button>
                       <button onClick={() => disconnect(platform.id)}
-                        style={{ background: "white", color: "#9ca3af", border: "0.5px solid #e5e7eb", borderRadius: 7, padding: "6px 10px", fontSize: 11, cursor: "pointer", fontFamily: "var(--body)" }}>
+                        style={{ background: "white", color: "#9ca3af", border: "0.5px solid #e5e7eb", borderRadius: 7, padding: "6px 10px", fontSize: 11, cursor: "pointer" }}>
                         Disconnect
                       </button>
                     </>
                   ) : (
                     <button onClick={() => connectPlatform(platform)} disabled={!conn.email || isSyncing || !serverUp}
-                      style={{ background: conn.email && serverUp ? platform.color : "#e5e7eb", color: "white", border: "none", borderRadius: 7, padding: "7px 16px", fontSize: 12, fontWeight: 600, cursor: conn.email && serverUp ? "pointer" : "not-allowed", fontFamily: "var(--body)" }}>
+                      style={{ background: conn.email && serverUp ? platform.color : "#e5e7eb", color: "white", border: "none", borderRadius: 7, padding: "7px 16px", fontSize: 12, fontWeight: 600, cursor: conn.email && serverUp ? "pointer" : "not-allowed" }}>
                       {isSyncing ? "⏳ Connecting…" : "Connect"}
                     </button>
                   )}

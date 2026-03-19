@@ -1,165 +1,157 @@
-import { useState, useMemo } from "react";
+// src/pages/Sales.jsx
+import { useState, useMemo, useEffect, useRef } from "react";
 import { KpiCard } from "../components/ui";
 import { fmt, fmtPct } from "../utils/format";
+import {
+  SALE_STATUSES,
+  SALE_STATUS_STYLES,
+  PLATFORM_COLORS,
+  categoryAccent,
+  FONT,
+} from "../lib/schema";
+import {
+  PlatformBadge,
+  PageHeader,
+  TableCard,
+  FilterBar,
+  FilterDivider,
+  SearchInput,
+  Checkbox,
+} from "../components/shared";
+import MatchSaleModal from "../components/modals/MatchSaleModal";
 
-const FONT = "Inter, sans-serif";
-
-const card = { background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" };
-
-const STATUS_STYLES = {
-  Pending:   { bg: "rgba(245,158,11,0.08)",  color: "#d97706", dot: "#f59e0b",  border: "rgba(245,158,11,0.2)" },
-  Paid:      { bg: "rgba(5,150,105,0.08)",   color: "#059669", dot: "#059669",  border: "rgba(5,150,105,0.2)" },
-  Delivered: { bg: "rgba(26,58,110,0.08)",   color: "#1a3a6e", dot: "#1a3a6e",  border: "rgba(26,58,110,0.2)" },
-  Cancelled: { bg: "#f1f5f9",                color: "#64748b", dot: "#94a3b8",  border: "#e2e6ea" },
+const COL = {
+  checkbox: 15,
+  icon:     34,
+  date:     90,
+  platform: 90,
+  qty:      50,
+  revenue:  90,
+  cost:     90,
+  profit:   100,
+  status:   80,
+  chevron:  16,
 };
 
-const PLATFORM_COLORS = {
-  Viagogo:               "#1a3a6e",
-  Tixstock:              "#059669",
-  Lysted:                "#7c3aed",
-  StubHub:               "#f97316",
-  "Ticketmaster Resale": "#ef4444",
-  "AXS Official Resale": "#0ea5e9",
-  Default:               "#64748b",
-};
+const ROW = { display: "flex", alignItems: "center", gap: 12, padding: "0 18px" };
 
-// Grid: checkbox + chevron + event + platform + qty + revenue + fees + profit + status + delete
-const GRID = "32px 24px 2fr 1fr 60px 90px 80px 90px 130px 34px";
+export default function Sales({ tickets, sales, setSales, updateSale, linkTicketsToSale, events, setShowAddSale, notify }) {
+  const [expandedEvents, setExpandedEvents]   = useState({});
+  const [filterStatus, setFilterStatus]       = useState("All");
+  const [filterPlatform, setFilterPlatform]   = useState("All");
+  const [searchQ, setSearchQ]                 = useState("");
+  const [selected, setSelected]               = useState(new Set());
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [matchingSale, setMatchingSale]       = useState(null);
+  const notifyFiredRef = useRef(false);
 
-// ── Normalise snake_case (DB) ↔ camelCase (frontend) ─────────────────────────
-function normSale(s) {
-  return {
-    id:         s.id,
-    eventName:  s.eventName  || s.event_name  || "Unknown Event",
-    category:   s.category   || "Concert",
-    platform:   s.platform   || "",
-    qtySold:    s.qtySold    ?? s.qty_sold    ?? 1,
-    salePrice:  s.salePrice  ?? s.sale_price  ?? 0,
-    fees:       s.fees       ?? 0,
-    costPer:    s.costPer    ?? s.cost_per    ?? 0,
-    saleStatus: s.saleStatus || s.sale_status || "Pending",
-    date:       s.date       || "",
-    notes:      s.notes      || "",
-    ticketId:   s.ticketId   || s.ticket_id   || null,
-    ticketIds:  s.ticketIds  || s.ticket_ids  || [],
-    section:    s.section    || "",
-    row:        s.row        || "",
-    seats:      s.seats      || "",
+  // Build event lookup
+  const eventMap = useMemo(() => {
+    const m = {};
+    (events || []).forEach(e => { m[e.id] = e; });
+    return m;
+  }, [events]);
+
+  // Helper — get event name for a sale
+  function saleEventName(s) {
+    return eventMap[s.eventId]?.name || s.eventName || "Unknown Event";
+  }
+  function saleCategory(s) {
+    return eventMap[s.eventId]?.category || "Concert";
+  }
+  function saleVenue(s) {
+    return eventMap[s.eventId]?.venue || "";
+  }
+
+  // ── Unmatched sales ───────────────────────────────────────────────────────
+  const unmatchedSales = useMemo(() =>
+    sales.filter(s => !s.ticketIds || s.ticketIds.length === 0),
+    [sales]
+  );
+
+  useEffect(() => {
+    if (notifyFiredRef.current) return;
+    if (unmatchedSales.length > 0) {
+      notify?.(`⚠️ ${unmatchedSales.length} sale${unmatchedSales.length !== 1 ? "s" : ""} need${unmatchedSales.length === 1 ? "s" : ""} matching`);
+      notifyFiredRef.current = true;
+    }
+  }, [unmatchedSales.length]);
+
+  // ── Match handlers ────────────────────────────────────────────────────────
+  const handleLink = async (saleId, ticketIds) => {
+    setMatchingSale(null);
+    if (linkTicketsToSale) {
+      await linkTicketsToSale(saleId, ticketIds);
+    } else {
+      setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds } : s));
+    }
+    notify?.(`✅ Sale linked to ${ticketIds.length} ticket${ticketIds.length !== 1 ? "s" : ""}`);
   };
-}
 
-function StatusPill({ status, onChange }) {
-  const s = STATUS_STYLES[status] || STATUS_STYLES.Pending;
-  return (
-    <select
-      value={status || "Pending"}
-      onChange={e => { e.stopPropagation(); onChange(e.target.value); }}
-      onClick={e => e.stopPropagation()}
-      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}`, borderRadius: 20, padding: "3px 8px", fontSize: 11, fontWeight: 700, fontFamily: FONT, cursor: "pointer", outline: "none" }}
-    >
-      {Object.keys(STATUS_STYLES).map(st => <option key={st} value={st}>{st}</option>)}
-    </select>
-  );
-}
+  const handleCreateAndLink = (saleId, newTicket) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("queud:createAndLink", { detail: { saleId, newTicket } }));
+    }
+    notify?.("✅ Ticket created and linked");
+  };
 
-function PlatformBadge({ platform }) {
-  const color = PLATFORM_COLORS[platform] || PLATFORM_COLORS.Default;
-  return (
-    <span style={{ background: `${color}14`, color, border: `1px solid ${color}28`, borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 700, letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
-      {platform}
-    </span>
-  );
-}
-
-// ── Seat chips — identical pill style to Inventory order rows ─────────────────
-function SeatChips({ sale, ticket }) {
-  const section = sale.section || ticket?.section || "";
-  const row     = sale.row     || ticket?.row     || "";
-  const seats   = sale.seats   || ticket?.seats   || "";
-  const isStanding = /standing|pitch|floor|general admission|ga\b/i.test(section);
-
-  if (!section && !row && !seats && !ticket) {
-    return <span style={{ color: "#9ca3af", fontSize: 11 }}>Ticket removed</span>;
-  }
-  if (!section && !row && !seats) {
-    return <span style={{ color: "#9ca3af", fontSize: 11 }}>No seat info</span>;
-  }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-      {section && (
-        <span style={{ background: isStanding ? "#f0fdfa" : "#eef2ff", color: isStanding ? "#0f766e" : "#1a3a6e", border: `1px solid ${isStanding ? "#99f6e4" : "#c7d2fe"}`, borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-          {isStanding ? section : `Sec ${section}`}
-        </span>
-      )}
-      {row && (
-        <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-          Row {row}
-        </span>
-      )}
-      {seats && (
-        <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-          {seats.includes(",") ? `Seats ${seats}` : `Seat ${seats}`}
-        </span>
-      )}
-      {sale.qtySold > 1 && !seats && (
-        <span style={{ background: "rgba(249,115,22,0.1)", color: "#f97316", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600 }}>
-          {sale.qtySold}×
-        </span>
-      )}
-    </div>
-  );
-}
-
-export default function Sales({ tickets, sales, setSales, updateSale, setShowAddSale }) {
-  const [expandedEvents, setExpandedEvents] = useState({});
-  const [filterStatus, setFilterStatus]     = useState("All");
-  const [filterPlatform, setFilterPlatform] = useState("All");
-  const [searchQ, setSearchQ]               = useState("");
-  const [selected, setSelected]             = useState(new Set());
-
-  const normed = useMemo(() => sales.map(normSale), [sales]);
-
-  // ── KPIs ─────────────────────────────────────────────────────────────────────
-  const totalRevenue = normed.reduce((a, s) => a + (s.salePrice * s.qtySold), 0);
-  const totalFees    = normed.reduce((a, s) => a + s.fees, 0);
-  const totalCost    = normed.reduce((a, s) => a + (s.costPer * s.qtySold), 0);
-  const totalProfit  = totalRevenue - totalFees - totalCost;
+  // ── KPIs ──────────────────────────────────────────────────────────────────
+  const totalRevenue = sales.reduce((a, s) => a + (s.salePrice || 0), 0);
+  const totalCost    = sales.reduce((a, s) => {
+    const linked = (s.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
+    return a + linked.reduce((b, t) => b + (t.cost || 0), 0);
+  }, 0);
+  const totalProfit  = totalRevenue - totalCost;
   const totalROI     = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
-  const totalQty     = normed.reduce((a, s) => a + s.qtySold, 0);
+  const totalQty     = sales.reduce((a, s) => a + s.qtySold, 0);
 
-  // ── Event groups ──────────────────────────────────────────────────────────────
+  // ── Event groups ──────────────────────────────────────────────────────────
   const eventGroups = useMemo(() => {
-    const filtered = normed.filter(s => {
-      if (filterStatus !== "All" && s.saleStatus !== filterStatus) return false;
-      if (filterPlatform !== "All" && s.platform !== filterPlatform) return false;
+    const filtered = sales.filter(s => {
+      if (filterStatus !== "All" && (s.saleStatus || "Pending") !== filterStatus) return false;
+      if (filterPlatform !== "All" && s.sellingPlatform !== filterPlatform) return false;
       if (searchQ) {
         const q = searchQ.toLowerCase();
-        return (s.eventName || "").toLowerCase().includes(q)
-          || (s.platform || "").toLowerCase().includes(q)
-          || (s.notes || "").toLowerCase().includes(q)
-          || (s.section || "").toLowerCase().includes(q);
+        return saleEventName(s).toLowerCase().includes(q)
+          || (s.sellingPlatform || "").toLowerCase().includes(q)
+          || (s.notes           || "").toLowerCase().includes(q)
+          || (s.section         || "").toLowerCase().includes(q)
+          || (s.orderId         || "").toLowerCase().includes(q);
       }
       return true;
     });
+
     const groups = {};
     filtered.forEach(s => {
-      const key = s.eventName;
-      if (!groups[key]) groups[key] = { eventName: key, category: s.category, sales: [], revenue: 0, fees: 0, cost: 0 };
+      const evName  = saleEventName(s);
+      const evDate  = eventMap[s.eventId]?.date || s.date || "";
+      const key     = (s.eventId || evName) + "||" + evDate;
+
+      if (!groups[key]) groups[key] = {
+        eventId:   s.eventId || "",
+        eventName: evName,
+        category:  saleCategory(s),
+        venue:     saleVenue(s),
+        date:      evDate,
+        sales: [], revenue: 0, cost: 0,
+      };
       groups[key].sales.push(s);
-      groups[key].revenue += s.salePrice * s.qtySold;
-      groups[key].fees    += s.fees;
-      groups[key].cost    += s.costPer * s.qtySold;
+      groups[key].revenue += s.salePrice || 0;
+
+      const linked = (s.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
+      groups[key].cost += linked.reduce((a, t) => a + (t.cost || 0), 0);
     });
+
     return Object.values(groups).sort((a, b) => b.revenue - a.revenue);
-  }, [normed, filterStatus, filterPlatform, searchQ]);
+  }, [sales, tickets, filterStatus, filterPlatform, searchQ, eventMap]);
 
-  const allPlatforms = [...new Set(normed.map(s => s.platform).filter(Boolean))];
+  const allPlatforms = [...new Set(sales.map(s => s.sellingPlatform).filter(Boolean))];
 
-  // ── Actions ───────────────────────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────────────────
   const updateSaleStatus = (saleId, v) => {
-    if (updateSale) updateSale(saleId, { sale_status: v, saleStatus: v });
-    else setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: v, sale_status: v } : s));
+    if (updateSale) updateSale(saleId, { saleStatus: v });
+    else setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: v } : s));
+    notify?.("Status → " + v);
   };
 
   const deleteSale = (saleId, e) => {
@@ -167,28 +159,22 @@ export default function Sales({ tickets, sales, setSales, updateSale, setShowAdd
     if (!window.confirm("Delete this sale record?")) return;
     setSales(prev => prev.filter(s => s.id !== saleId));
     setSelected(prev => { const n = new Set(prev); n.delete(saleId); return n; });
+    notify?.("Sale deleted");
   };
 
-  const toggleSelect = (id, e) => {
-    e.stopPropagation();
-    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  };
-
-  const toggleSelectAll = () => {
-    const allIds = normed.map(s => s.id);
-    setSelected(selected.size === allIds.length ? new Set() : new Set(allIds));
-  };
-
-  const massDelete = () => {
+  const toggleSelect    = (id, e) => { e.stopPropagation(); setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
+  const toggleSelectAll = () => { const all = sales.map(s => s.id); setSelected(selected.size === all.length ? new Set() : new Set(all)); };
+  const massDelete      = () => {
     if (!selected.size) return;
-    if (!window.confirm(`Delete ${selected.size} sale${selected.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${selected.size} sale${selected.size !== 1 ? "s" : ""}?`)) return;
     setSales(prev => prev.filter(s => !selected.has(s.id)));
+    notify?.(`Deleted ${selected.size} sales`);
     setSelected(new Set());
   };
 
   const kpis = [
     { label: "Total Revenue", value: fmt(totalRevenue), color: "#f97316", iconKey: "kpi_revenue", sub: `${totalQty} ticket${totalQty !== 1 ? "s" : ""} sold` },
-    { label: "Platform Fees", value: fmt(totalFees),    color: "#ef4444", iconKey: "kpi_invested" },
+    { label: "Total Cost",    value: fmt(totalCost),    color: "#ef4444", iconKey: "kpi_invested" },
     { label: "Net Profit",    value: fmt(totalProfit),  color: totalProfit >= 0 ? "#059669" : "#ef4444", iconKey: "kpi_profit" },
     { label: "ROI",           value: fmtPct(totalROI),  color: totalROI  >= 0 ? "#059669" : "#ef4444", iconKey: "kpi_roi" },
     { label: "Avg per Sale",  value: sales.length > 0 ? fmt(totalProfit / sales.length) : "—", color: "#1a3a6e", iconKey: "kpi_sold", sub: `${sales.length} transaction${sales.length !== 1 ? "s" : ""}` },
@@ -197,77 +183,87 @@ export default function Sales({ tickets, sales, setSales, updateSale, setShowAdd
   return (
     <div className="fade-up">
 
-      {/* ── Header — matches Inventory exactly ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 22, color: "#111827", letterSpacing: "-0.03em" }}>Sales</div>
-          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>
-            {eventGroups.length} event{eventGroups.length !== 1 ? "s" : ""} · {totalQty} ticket{totalQty !== 1 ? "s" : ""} sold
+      <PageHeader
+        title="Sales"
+        sub={`${eventGroups.length} event${eventGroups.length !== 1 ? "s" : ""} · ${totalQty} ticket${totalQty !== 1 ? "s" : ""} sold`}
+        action={
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {selected.size > 0 && (
+              <button onClick={massDelete} style={{ background: "#111827", color: "white", border: "none", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                🗑 Delete {selected.size}
+              </button>
+            )}
+            <button className="action-btn" onClick={() => setShowAddSale(true)}>+ Record Sale</button>
           </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {selected.size > 0 && (
-            <button onClick={massDelete}
-              style={{ background: "#111827", color: "white", border: "none", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
-              🗑 Delete {selected.size}
-            </button>
-          )}
-          <button className="action-btn" onClick={() => setShowAddSale(true)}>+ Record Sale</button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* ── KPI strip ── */}
+      {/* KPI strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 18 }}>
         {kpis.map(k => <KpiCard key={k.label} {...k} />)}
       </div>
 
-      {/* ── Filter bar — matches Inventory ── */}
-      <div style={{ background: "#ffffff", border: "0.5px solid #e8e8ec", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-
-        {/* Search */}
-        <div style={{ position: "relative", flex: "1 1 220px", maxWidth: 280 }}>
-          <input
-            value={searchQ} onChange={e => setSearchQ(e.target.value)}
-            placeholder="Search events, platforms, sections…"
-            style={{ background: "#f9f9fb", border: "0.5px solid #e8e8ec", padding: "7px 12px 7px 30px", borderRadius: 7, fontFamily: FONT, fontSize: 12, width: "100%", outline: "none", color: "#111827" }}
-          />
-          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#9ca3af" }}>🔍</span>
-        </div>
-
-        {/* Select all */}
-        <div onClick={toggleSelectAll} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "4px 10px", borderRadius: 20, border: `1px solid ${selected.size > 0 ? "rgba(26,58,110,0.3)" : "#e8e8ec"}`, background: selected.size > 0 ? "rgba(26,58,110,0.06)" : "transparent" }}>
-          <div style={{ width: 12, height: 12, borderRadius: 3, border: `1.5px solid ${selected.size > 0 ? "#1a3a6e" : "#d1d5db"}`, background: selected.size === normed.length && normed.length > 0 ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {selected.size === normed.length && normed.length > 0 && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
-            {selected.size > 0 && selected.size < normed.length && <span style={{ color: "#1a3a6e", fontSize: 8 }}>—</span>}
+      {/* Unmatched banner */}
+      {unmatchedSales.length > 0 && !bannerDismissed && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 10, padding: "10px 16px", marginBottom: 14 }}>
+          <span style={{ fontSize: 16 }}>⚠️</span>
+          <div style={{ flex: 1, fontFamily: FONT }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>
+              {unmatchedSales.length} sale{unmatchedSales.length !== 1 ? "s" : ""} need{unmatchedSales.length === 1 ? "s" : ""} matching
+            </span>
+            <span style={{ fontSize: 12, color: "#a16207", marginLeft: 8 }}>
+              No inventory tickets linked — cost and profit will be inaccurate until matched.
+            </span>
           </div>
-          <span style={{ fontSize: 11, color: selected.size > 0 ? "#1a3a6e" : "#6b7280", fontWeight: 600 }}>
+          <button
+            onClick={() => {
+              const allKeys = {};
+              sales.forEach(s => { const k = (s.eventId || saleEventName(s)) + (eventMap[s.eventId]?.date || s.date || ""); allKeys[k] = true; });
+              setExpandedEvents(allKeys);
+            }}
+            style={{ fontSize: 11, fontWeight: 600, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: FONT }}
+          >Expand All</button>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            style={{ background: "transparent", border: "none", color: "#a16207", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 4 }}
+          >✕</button>
+        </div>
+      )}
+
+      {/* Filter bar */}
+      <FilterBar>
+        <SearchInput value={searchQ} onChange={setSearchQ} placeholder="Search events, platforms, sections…" />
+        <div
+          onClick={toggleSelectAll}
+          style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "4px 10px", borderRadius: 20, border: `1px solid ${selected.size > 0 ? "rgba(26,58,110,0.3)" : "#e8e8ec"}`, background: selected.size > 0 ? "rgba(26,58,110,0.06)" : "transparent" }}
+        >
+          <Checkbox checked={selected.size === sales.length && sales.length > 0} indeterminate={selected.size > 0 && selected.size < sales.length} size={12} />
+          <span style={{ fontSize: 11, color: selected.size > 0 ? "#1a3a6e" : "#6b7280", fontWeight: 600, fontFamily: FONT }}>
             {selected.size > 0 ? `${selected.size} selected` : "Select all"}
           </span>
         </div>
 
-        <div style={{ width: 1, height: 16, background: "#e8e8ec", flexShrink: 0 }} />
+        <FilterDivider />
 
-        {/* Status filters */}
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {["All", ...Object.keys(STATUS_STYLES)].map(s => {
-            const st = s !== "All" ? STATUS_STYLES[s] : null;
+          {["All", ...SALE_STATUSES].map(s => {
+            const st = s !== "All" ? SALE_STATUS_STYLES[s] : null;
             const active = filterStatus === s;
             return (
-              <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${active ? (st?.dot || "#1a3a6e") : "#e8e8ec"}`, background: active ? (st?.bg || "rgba(26,58,110,0.1)") : "transparent", color: active ? (st?.color || "#1a3a6e") : "#6b7280", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}>
-                {st && <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />}{s}
+              <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${active ? (st?.dot || "#1a3a6e") : "#e8e8ec"}`, background: active ? (st?.bg || "rgba(26,58,110,0.1)") : "transparent", color: active ? (st?.text || "#1a3a6e") : "#6b7280", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}>
+                {st && active && <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />}{s}
               </button>
             );
           })}
         </div>
 
-        {/* Platform filters */}
         {allPlatforms.length > 0 && (
           <>
-            <div style={{ width: 1, height: 16, background: "#e8e8ec", flexShrink: 0 }} />
+            <FilterDivider />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {["All", ...allPlatforms].map(p => {
                 const active = filterPlatform === p;
-                const color = PLATFORM_COLORS[p] || PLATFORM_COLORS.Default;
+                const color  = PLATFORM_COLORS[p] || PLATFORM_COLORS.Default;
                 return (
                   <button key={p} onClick={() => setFilterPlatform(p)} style={{ padding: "4px 10px", borderRadius: 20, border: `1px solid ${active ? color : "#e8e8ec"}`, background: active ? `${color}14` : "transparent", color: active ? color : "#6b7280", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
                     {p}
@@ -277,19 +273,25 @@ export default function Sales({ tickets, sales, setSales, updateSale, setShowAdd
             </div>
           </>
         )}
-      </div>
+      </FilterBar>
 
-      {/* ── Table ── */}
-      <div style={{ ...card, overflow: "hidden" }}>
-
-        {/* Column headers — matches Inventory typography exactly */}
-        <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 0, padding: "9px 18px", borderBottom: "1px solid #f0f0f3", background: "#fafafa" }}>
-          {["", "", "Event", "Platform", "Qty", "Revenue", "Fees", "Profit", "Status", ""].map((h, i) => (
-            <div key={i} style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af" }}>{h}</div>
-          ))}
+      {/* Table */}
+      <TableCard>
+        {/* Headers */}
+        <div style={{ ...ROW, padding: "9px 18px", borderBottom: "1px solid #f0f0f3", background: "#fafafa" }}>
+          <div style={{ width: COL.checkbox, flexShrink: 0 }} />
+          <div style={{ width: COL.icon,     flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT }}>Event</div>
+          <div style={{ width: COL.date,     flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT }}>Date</div>
+          <div style={{ width: COL.platform, flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT }}>Platform</div>
+          <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT }}>Qty</div>
+          <div style={{ width: COL.revenue,  flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT, textAlign: "right" }}>Revenue</div>
+          <div style={{ width: COL.cost,     flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT, textAlign: "right" }}>Cost</div>
+          <div style={{ width: COL.profit,   flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT, textAlign: "right" }}>Profit</div>
+          <div style={{ width: COL.status,   flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT }}>Status</div>
+          <div style={{ width: COL.chevron,  flexShrink: 0 }} />
         </div>
 
-        {/* Empty states */}
         {sales.length === 0 ? (
           <div style={{ padding: "56px 18px", textAlign: "center" }}>
             <div style={{ fontSize: 36, marginBottom: 12 }}>💸</div>
@@ -305,15 +307,16 @@ export default function Sales({ tickets, sales, setSales, updateSale, setShowAdd
             <button className="ghost-btn" style={{ marginTop: 12 }} onClick={() => { setSearchQ(""); setFilterStatus("All"); setFilterPlatform("All"); }}>Clear filters</button>
           </div>
         ) : eventGroups.map((group, gi) => {
-          const isExpanded   = expandedEvents[group.eventName];
-          const groupProfit  = group.revenue - group.fees - group.cost;
-          const groupROI     = group.cost > 0 ? (groupProfit / group.cost) * 100 : 0;
-          const qtySold      = group.sales.reduce((a, s) => a + s.qtySold, 0);
-          const accent       = group.category === "Sport" ? "#1a3a6e" : "#7c3aed";
-          const platforms    = [...new Set(group.sales.map(s => s.platform).filter(Boolean))];
-          const groupIds     = group.sales.map(s => s.id);
-          const allGroupSel  = groupIds.every(id => selected.has(id));
-          const someGroupSel = groupIds.some(id => selected.has(id));
+          const eKey        = (group.eventId || group.eventName) + group.date;
+          const isExpanded  = expandedEvents[eKey];
+          const groupProfit = group.revenue - group.cost;
+          const groupROI    = group.cost > 0 ? (groupProfit / group.cost) * 100 : 0;
+          const qtySold     = group.sales.reduce((a, s) => a + s.qtySold, 0);
+          const accent      = categoryAccent(group.category);
+          const platforms   = [...new Set(group.sales.map(s => s.sellingPlatform).filter(Boolean))];
+          const groupIds    = group.sales.map(s => s.id);
+          const allGroupSel = groupIds.every(id => selected.has(id));
+          const someGroupSel= groupIds.some(id => selected.has(id));
 
           const toggleGroup = e => {
             e.stopPropagation();
@@ -326,111 +329,156 @@ export default function Sales({ tickets, sales, setSales, updateSale, setShowAdd
           };
 
           return (
-            <div key={group.eventName} style={{ borderBottom: gi < eventGroups.length - 1 ? "0.5px solid #f0f0f3" : "none" }}>
+            <div key={eKey} style={{ borderBottom: gi < eventGroups.length - 1 ? "0.5px solid #f0f0f3" : "none" }}>
 
-              {/* ── Event group row — matches Inventory event row ── */}
+              {/* Event group row */}
               <div
-                onClick={() => setExpandedEvents(s => ({ ...s, [group.eventName]: !s[group.eventName] }))}
-                style={{ display: "grid", gridTemplateColumns: GRID, gap: 0, padding: "12px 18px", alignItems: "center", cursor: "pointer", background: isExpanded ? "#fafafa" : "white", borderLeft: `3px solid ${accent}`, transition: "background 0.1s" }}
-                onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = "#fafafa"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = isExpanded ? "#fafafa" : "white"; }}
+                onClick={() => setExpandedEvents(s => ({ ...s, [eKey]: !s[eKey] }))}
+                style={{ ...ROW, padding: "12px 18px", cursor: "pointer", background: someGroupSel ? "#fffbf7" : "white", borderLeft: `3px solid ${accent}`, transition: "background 0.1s" }}
+                onMouseEnter={e => { if (!someGroupSel) e.currentTarget.style.background = "#fafafa"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = someGroupSel ? "#fffbf7" : "white"; }}
               >
-                {/* Group checkbox — navy to match Inventory */}
-                <div onClick={toggleGroup} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px solid ${someGroupSel ? "#1a3a6e" : "#d1d5db"}`, background: allGroupSel ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                    {allGroupSel  && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
-                    {!allGroupSel && someGroupSel && <span style={{ color: "#1a3a6e", fontSize: 9 }}>—</span>}
+                <div onClick={toggleGroup}
+                  style={{ width: COL.checkbox, height: COL.checkbox, borderRadius: 4, border: `1.5px solid ${allGroupSel ? "#1a3a6e" : someGroupSel ? "#1a3a6e" : "#d1d5db"}`, background: allGroupSel ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
+                  {allGroupSel  && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                  {!allGroupSel && someGroupSel && <span style={{ color: "#1a3a6e", fontSize: 9 }}>—</span>}
+                </div>
+
+                <div style={{ width: COL.icon, height: COL.icon, borderRadius: 8, background: group.category === "Sport" ? "rgba(26,58,110,0.08)" : "rgba(124,58,237,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
+                  {group.category === "Sport" ? "⚽" : "🎵"}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: FONT }}>{group.eventName}</div>
+                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2, fontFamily: FONT, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    {group.venue && <span>{group.venue} ·</span>}
+                    <span>{group.sales.length} sale{group.sales.length !== 1 ? "s" : ""}</span>
+                    {platforms.map(p => <PlatformBadge key={p} platform={p} />)}
                   </div>
                 </div>
 
-                {/* Chevron — CSS rotation, same as Inventory */}
-                <div style={{ fontSize: 12, color: "#9ca3af", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s", textAlign: "center" }}>›</div>
-
-                {/* Category icon + event name — matches Inventory event row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 8, background: group.category === "Sport" ? "rgba(26,58,110,0.08)" : "rgba(124,58,237,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
-                    {group.category === "Sport" ? "⚽" : "🎵"}
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.eventName}</div>
-                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{group.sales.length} sale{group.sales.length !== 1 ? "s" : ""}</div>
-                  </div>
+                <div style={{ width: COL.date,     flexShrink: 0, fontSize: 12, color: "#6b7280", fontFamily: FONT }}>{group.date || "—"}</div>
+                <div style={{ width: COL.platform, flexShrink: 0 }} />
+                <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{qtySold}×</div>
+                <div style={{ width: COL.revenue,  flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{fmt(group.revenue)}</div>
+                <div style={{ width: COL.cost,     flexShrink: 0, fontSize: 13, color: "#6b7280", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{group.cost > 0 ? fmt(group.cost) : "—"}</div>
+                <div style={{ width: COL.profit,   flexShrink: 0, textAlign: "right" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: groupProfit >= 0 ? "#059669" : "#ef4444", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{groupProfit >= 0 ? "+" : ""}{fmt(groupProfit)}</div>
+                  <div style={{ fontSize: 10, color: groupROI >= 0 ? "#059669" : "#ef4444", marginTop: 1, fontFamily: FONT }}>{fmtPct(groupROI)} ROI</div>
                 </div>
-
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {platforms.map(p => <PlatformBadge key={p} platform={p} />)}
-                </div>
-
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums" }}>{qtySold}×</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums" }}>{fmt(group.revenue)}</div>
-                <div style={{ fontSize: 12, color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{group.fees > 0 ? fmt(group.fees) : "—"}</div>
-
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: groupProfit >= 0 ? "#059669" : "#ef4444", fontVariantNumeric: "tabular-nums" }}>
-                    {groupProfit >= 0 ? "+" : ""}{fmt(groupProfit)}
-                  </div>
-                  <div style={{ fontSize: 10, color: groupROI >= 0 ? "#059669" : "#ef4444", marginTop: 1 }}>{fmtPct(groupROI)} ROI</div>
-                </div>
-
-                <div /><div />
+                <div style={{ width: COL.status,  flexShrink: 0 }} />
+                <div style={{ width: COL.chevron, flexShrink: 0, fontSize: 12, color: "#9ca3af", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</div>
               </div>
 
-              {/* ── Individual sale rows — matches Inventory order rows ── */}
+              {/* Individual sale rows */}
               {isExpanded && group.sales.map((s, si) => {
-                const ticket     = tickets.find(t => t.id === s.ticketId);
-                const sProfit    = (s.salePrice * s.qtySold) - s.fees - (s.costPer * s.qtySold);
-                const isSelected = selected.has(s.id);
+                const matchedTickets = (s.ticketIds || [])
+                  .map(id => tickets.find(t => t.id === id))
+                  .filter(Boolean);
+
+                const isUnmatched = !s.ticketIds || s.ticketIds.length === 0;
+                const costTotal   = matchedTickets.reduce((a, t) => a + (t.cost || 0), 0);
+                const sProfit     = (s.salePrice || 0) - costTotal;
+                const isSelected  = selected.has(s.id);
 
                 return (
                   <div key={s.id}
-                    style={{ display: "grid", gridTemplateColumns: GRID, gap: 0, padding: "9px 18px", alignItems: "center", borderTop: "0.5px solid #f0f0f3", background: isSelected ? "rgba(26,58,110,0.03)" : si % 2 === 0 ? "#f9f9fb" : "#f7f8fa", transition: "background 0.1s" }}
+                    style={{ ...ROW, padding: "9px 18px", borderTop: "0.5px solid #f0f0f3", background: isSelected ? "rgba(26,58,110,0.03)" : "#f9f9fb", transition: "background 0.1s" }}
                     onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#f4f4f6"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(26,58,110,0.03)" : si % 2 === 0 ? "#f9f9fb" : "#f7f8fa"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(26,58,110,0.03)" : "#f9f9fb"; }}
                   >
-                    {/* Row checkbox */}
-                    <div onClick={e => toggleSelect(s.id, e)} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d5db"}`, background: isSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                        {isSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
-                      </div>
+                    <div onClick={e => toggleSelect(s.id, e)}
+                      style={{ width: COL.checkbox, height: COL.checkbox, borderRadius: 3, border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d5db"}`, background: isSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
+                      {isSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
                     </div>
 
-                    {/* Indent line */}
-                    <div style={{ display: "flex", justifyContent: "center" }}>
+                    <div style={{ width: COL.icon, flexShrink: 0, display: "flex", justifyContent: "center" }}>
                       <div style={{ width: 2, height: 22, background: "#e2e6ea", borderRadius: 2 }} />
                     </div>
 
-                    {/* Seat chips + date/notes */}
-                    <div style={{ paddingLeft: 4 }}>
-                      <SeatChips sale={s} ticket={ticket} />
-                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>
-                        {s.date}{s.notes ? ` · ${s.notes}` : ""}
+                    {/* Sale info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                        {s.section && (
+                          <span style={{ background: "#eef2ff", color: "#1a3a6e", border: "1px solid #c7d2fe", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                            {/standing|general admission|ga\b/i.test(s.section) ? s.section : `Sec ${s.section}`}
+                          </span>
+                        )}
+                        {s.row && (
+                          <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>Row {s.row}</span>
+                        )}
+                        {s.seats && (
+                          <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.seats}</span>
+                        )}
+                        {!s.section && !s.row && !s.seats && (
+                          <span style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.qtySold}× tickets</span>
+                        )}
+                        {s.orderId && (
+                          <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "monospace" }}>Order {s.orderId}</span>
+                        )}
+                        {isUnmatched && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setMatchingSale(s); }}
+                            style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, color: "#92400e", cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap", flexShrink: 0 }}
+                          >⚠ Unmatched</button>
+                        )}
                       </div>
+                      {/* Customer info — shown when present */}
+                      {(s.customerEmail || s.customerPhone) && (
+                        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3, display: "flex", gap: 8 }}>
+                          {s.customerEmail && <span>✉ {s.customerEmail}</span>}
+                          {s.customerPhone && <span>📱 {s.customerPhone}</span>}
+                        </div>
+                      )}
                     </div>
 
-                    <div><PlatformBadge platform={s.platform} /></div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums" }}>{s.qtySold}×</div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums" }}>{fmt(s.salePrice * s.qtySold)}</div>
-                    <div style={{ fontSize: 12, color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{s.fees > 0 ? fmt(s.fees) : "—"}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: sProfit >= 0 ? "#059669" : "#ef4444", fontVariantNumeric: "tabular-nums" }}>
-                      {sProfit >= 0 ? "+" : ""}{fmt(sProfit)}
+                    <div style={{ width: COL.date,     flexShrink: 0, fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{s.date || "—"}</div>
+                    <div style={{ width: COL.platform, flexShrink: 0 }}><PlatformBadge platform={s.sellingPlatform} /></div>
+                    <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{s.qtySold}×</div>
+                    <div style={{ width: COL.revenue,  flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{fmt(s.salePrice)}</div>
+                    <div style={{ width: COL.cost,     flexShrink: 0, fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{costTotal > 0 ? fmt(costTotal) : "—"}</div>
+                    <div style={{ width: COL.profit,   flexShrink: 0, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: FONT, color: isUnmatched ? "#d97706" : sProfit >= 0 ? "#059669" : "#ef4444", textAlign: "right" }}>
+                      {isUnmatched ? "?" : `${sProfit >= 0 ? "+" : ""}${fmt(sProfit)}`}
                     </div>
 
-                    <StatusPill status={s.saleStatus} onChange={v => updateSaleStatus(s.id, v)} />
+                    {/* Status — clickable */}
+                    <div style={{ width: COL.status, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                      {(() => {
+                        const st = SALE_STATUS_STYLES[s.saleStatus] || SALE_STATUS_STYLES.Pending;
+                        return (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: st.bg, color: st.text, borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 600, fontFamily: FONT }}>
+                            <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />
+                            {s.saleStatus || "Pending"}
+                          </div>
+                        );
+                      })()}
+                    </div>
 
-                    <button
-                      onClick={e => deleteSale(s.id, e)}
-                      title="Delete sale"
-                      style={{ background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer", padding: "4px", borderRadius: 5, fontSize: 13, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
-                      onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.color = "#d1d5db"; e.currentTarget.style.background = "transparent"; }}
-                    >✕</button>
+                    <div style={{ width: COL.chevron, flexShrink: 0 }}>
+                      <button
+                        onClick={e => deleteSale(s.id, e)}
+                        style={{ background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer", padding: "2px", borderRadius: 5, fontSize: 13, lineHeight: 1, transition: "all 0.15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = "#d1d5db"; }}
+                      >✕</button>
+                    </div>
                   </div>
                 );
               })}
             </div>
           );
         })}
-      </div>
+      </TableCard>
+
+      {matchingSale && (
+        <MatchSaleModal
+          sale={matchingSale}
+          tickets={tickets}
+          onLink={handleLink}
+          onCreateAndLink={handleCreateAndLink}
+          onClose={() => setMatchingSale(null)}
+        />
+      )}
     </div>
   );
 }

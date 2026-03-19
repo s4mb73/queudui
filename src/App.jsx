@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQueudData } from "./hooks/useQueudData";
-import { uid, fmt, fmtPct, today, fetchExchangeRate, detectCurrency } from "./utils/format";
-import { parseEmail } from "./utils/parseEmail";
+import { uid, fmt, today } from "./utils/format";
 import { supabase } from "./lib/supabase";
 import { Sidebar } from "./components/ui";
 import { AddTicketModal, RecordSaleModal } from "./components/Modals";
@@ -10,120 +9,169 @@ import Inventory from "./pages/Inventory";
 import Sales from "./pages/Sales";
 import Settings from "./pages/Settings/index";
 
-const BLANK_TICKET = { event: "", category: "Concert", subtype: "", date: "", time: "", venue: "", section: "", row: "", seats: "", qty: 2, costPrice: "", orderRef: "", notes: "", accountEmail: "", originalCurrency: "USD", originalAmount: "", exchangeRate: 1, status: "Unsold", restrictions: "" };
-const BLANK_SALE = { ticketId: "", qtySold: 1, salePrice: "", platform: "StubHub", date: today(), fees: "", notes: "" };
+const BLANK_TICKET = {
+  event: "", date: "", time: "", venue: "",
+  section: "", row: "", seats: "",
+  qty: 2, cost: "", costPerTicket: "",
+  orderRef: "", notes: "", accountEmail: "",
+  buyingPlatform: "Ticketmaster",
+  status: "Unsold", restrictions: "",
+  isStanding: false, listedOn: "",
+  eventId: "",
+};
+
+const BLANK_SALE = {
+  sellingPlatform: "Viagogo",
+  orderId: "",
+  qtySold: 1,
+  salePrice: "",
+  salePriceEach: "",
+  date: today(),
+  notes: "",
+  customerEmail: "",
+  customerPhone: "",
+};
 
 export default function App() {
-  const { tickets, setTickets, sales, setSales, updateSale, settings, setSettings, loading, error } = useQueudData();
-  const [view, setView] = useState("dashboard");
-  const [toast, setToast] = useState(null);
-  const [migrated, setMigrated] = useState(false);
+  const {
+    events,
+    tickets, setTickets,
+    sales, setSales, updateSale,
+    settings, setSettings,
+    findOrCreateEvent, linkTicketsToSale,
+    loading, error,
+  } = useQueudData();
+
+  const [view, setView]                 = useState("dashboard");
+  const [toast, setToast]               = useState(null);
   const [showAddTicket, setShowAddTicket] = useState(false);
-  const [showAddSale, setShowAddSale] = useState(false);
+  const [showAddSale, setShowAddSale]   = useState(false);
   const [editingTicket, setEditingTicket] = useState(null);
   const [tf, setTf] = useState(BLANK_TICKET);
   const [sf, setSf] = useState(BLANK_SALE);
-
-  useEffect(() => {
-    if (loading || migrated) return;
-    const alreadyMigrated = localStorage.getItem('queud_migrated_to_supabase');
-    if (alreadyMigrated) return;
-    const localTickets = JSON.parse(localStorage.getItem('queud_tickets') || '[]');
-    const localSales = JSON.parse(localStorage.getItem('queud_sales') || '[]');
-    if (localTickets.length > 0 || localSales.length > 0) {
-      notify(`Migrating ${localTickets.length} tickets and ${localSales.length} sales to Supabase...`);
-      Promise.all([
-        localTickets.length > 0 ? setTickets(() => localTickets) : Promise.resolve(),
-        localSales.length > 0 ? setSales(() => localSales) : Promise.resolve(),
-      ]).then(() => {
-        localStorage.setItem('queud_migrated_to_supabase', 'true');
-        setMigrated(true);
-        notify(`Migrated ${localTickets.length} tickets to Supabase`);
-      });
-    } else {
-      localStorage.setItem('queud_migrated_to_supabase', 'true');
-    }
-  }, [loading]);
 
   const notify = (msg, type = "ok") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  const saveTicket = () => {
-    if (!tf.event || !tf.costPrice) return notify("Fill in event name and cost", "err");
+  // ── Save ticket (add or edit) ─────────────────────────────────────────────
+  const saveTicket = async () => {
+    if (!tf.event || !tf.cost) return notify("Fill in event name and cost", "err");
+
+    const cost         = parseFloat(tf.cost) || 0;
+    const qty          = parseInt(tf.qty) || 1;
+    const costPerTicket = parseFloat(tf.costPerTicket) || parseFloat((cost / qty).toFixed(2));
+
+    // Find or create the event row
+    let eventId = tf.eventId || null;
+    if (!eventId && tf.event) {
+      eventId = await findOrCreateEvent({
+        name:     tf.event,
+        venue:    (tf.venue || "").split(",")[0].trim(),
+        date:     tf.date || "",
+        time:     tf.time || "",
+        category: tf.category || "Concert",
+      });
+    }
+
     if (editingTicket) {
       setTickets(prev => prev.map(t => t.id === editingTicket.id
-        ? { ...tf, id: t.id, qty: parseInt(tf.qty), costPrice: parseFloat(tf.costPrice), qtyAvailable: (t.qtyAvailable ?? t.qty) + (parseInt(tf.qty) - t.qty) }
+        ? { ...tf, id: t.id, eventId, qty, cost, costPerTicket,
+            qtyAvailable: (t.qtyAvailable ?? t.qty) + (qty - t.qty) }
         : t));
       notify("Ticket updated");
     } else {
-      const qty = parseInt(tf.qty);
-      setTickets(prev => [...prev, { ...tf, id: uid(), addedAt: new Date().toISOString(), qty, costPrice: parseFloat(tf.costPrice), qtyAvailable: qty }]);
+      setTickets(prev => [...prev, {
+        ...tf, id: uid(), eventId, qty, cost, costPerTicket,
+        qtyAvailable: qty, addedAt: new Date().toISOString(),
+      }]);
       notify("Added to inventory");
     }
-    setShowAddTicket(false); setEditingTicket(null); setTf(BLANK_TICKET);
+
+    setShowAddTicket(false);
+    setEditingTicket(null);
+    setTf(BLANK_TICKET);
   };
 
-  // saveSale accepts ticketIds array (multi-select) or falls back to sf.ticketId
-  const saveSale = (ticketIds) => {
+  // ── Record a sale manually ────────────────────────────────────────────────
+  const saveSale = async (ticketIds) => {
     const ids = Array.isArray(ticketIds) && ticketIds.length > 0 ? ticketIds : [sf.ticketId];
     if (!ids[0] || !sf.salePrice) return notify("Select at least one ticket and enter sale price", "err");
+
     const selectedTickets = ids.map(id => tickets.find(t => t.id === id)).filter(Boolean);
     if (!selectedTickets.length) return;
-    const qtySold = selectedTickets.length;
-    const salePrice = parseFloat(sf.salePrice);
-    const fees = parseFloat(sf.fees) || 0;
-    const totalCostBasis = selectedTickets.reduce((a, t) => a + t.costPrice, 0);
-    const profit = (salePrice * qtySold) - totalCostBasis - fees;
-    const costPer = totalCostBasis / qtySold;
-    const firstTicket = selectedTickets[0];
-    // Record one sale entry with qty = number of tickets selected
+
+    const qtySold       = selectedTickets.length;
+    const salePrice     = parseFloat(sf.salePrice) || 0;
+    const salePriceEach = parseFloat((salePrice / qtySold).toFixed(2));
+    const firstTicket   = selectedTickets[0];
+    const saleId        = uid();
+
     setSales(prev => [...prev, {
-      ...sf, id: uid(), qtySold, salePrice, fees, profit, costPer,
-      saleStatus: "Pending",
-      ticketId: firstTicket.id,
-      ticketIds: ids,
-      eventName: firstTicket.event, category: firstTicket.category,
-      section: firstTicket.section, row: firstTicket.row,
-      seats: selectedTickets.map(t => t.seats).filter(Boolean).join(", "),
-      recordedAt: new Date().toISOString(),
+      id: saleId,
+      eventId:         firstTicket.eventId || "",
+      sellingPlatform: sf.sellingPlatform || "Viagogo",
+      orderId:         sf.orderId || "",
+      qtySold,
+      salePrice,
+      salePriceEach,
+      saleStatus:      "Pending",
+      ticketIds:       ids,
+      section:         firstTicket.section || "",
+      row:             firstTicket.row || "",
+      seats:           selectedTickets.map(t => t.seats).filter(Boolean).join(", "),
+      date:            sf.date || today(),
+      customerEmail:   sf.customerEmail || "",
+      customerPhone:   sf.customerPhone || "",
+      notes:           sf.notes || "",
+      recordedAt:      new Date().toISOString(),
     }]);
-    // Mark all selected tickets as Sold
-    setTickets(prev => prev.map(t => ids.includes(t.id) ? { ...t, status: "Sold", qtyAvailable: 0 } : t));
-    setShowAddSale(false); setSf(BLANK_SALE);
-    notify(`Sale recorded · ${qtySold > 1 ? `${qtySold} tickets · ` : ""}${profit >= 0 ? "+" : ""}${fmt(profit)} profit`);
+
+    if (linkTicketsToSale) await linkTicketsToSale(saleId, ids);
+
+    setShowAddSale(false);
+    setSf(BLANK_SALE);
+    notify(`Sale recorded · ${qtySold > 1 ? `${qtySold} tickets · ` : ""}£${salePrice.toFixed(2)}`);
   };
 
+  // ── Import parsed email into Add Ticket modal ─────────────────────────────
   const importParsed = async (data) => {
     let section = data.section || "";
-    let row = data.row || "";
-    let seats = data.seats || "";
+    let row     = data.row || "";
+    let seats   = data.seats || "";
+
     if (data.section && (!row || !seats)) {
-      const rowMatch = data.section.match(/Row\s*([\w\d]+)/i);
+      const rowMatch  = data.section.match(/Row\s*([\w\d]+)/i);
       if (rowMatch) row = row || rowMatch[1];
       const seatMatch = data.section.match(/Seat[s]?\s*([\d\s\-\u2013]+)/i);
       if (seatMatch) seats = seats || seatMatch[1].trim();
-      const secMatch = data.section.match(/Sec(?:tion)?\s*([\w\d]+)/i);
+      const secMatch  = data.section.match(/Sec(?:tion)?\s*([\w\d]+)/i);
       if (secMatch) section = secMatch[1];
     }
-    const originalCurrency = data.originalCurrency || detectCurrency(data.rawCostString || "") || "USD";
-    const originalAmount = parseFloat(data.costPrice) || 0;
-    let exchangeRate = 1;
-    let costPriceUSD = originalAmount;
-    if (originalCurrency !== "USD" && originalAmount > 0) {
-      try {
-        notify("Fetching exchange rate...");
-        exchangeRate = await fetchExchangeRate(originalCurrency);
-        costPriceUSD = parseFloat((originalAmount * exchangeRate).toFixed(2));
-      } catch (e) { costPriceUSD = originalAmount; }
-    }
-    setTf({ ...BLANK_TICKET, ...data, section, row, seats, qty: data.qty || 2, costPrice: costPriceUSD.toString(), originalCurrency, originalAmount: originalAmount.toString(), exchangeRate, accountEmail: data.accountEmail || "" });
+
+    const cost         = parseFloat(data.cost || data.costPrice) || 0;
+    const qty          = parseInt(data.qty) || 1;
+    const costPerTicket = parseFloat(data.costPerTicket) || parseFloat((cost / qty).toFixed(2));
+
+    setTf({
+      ...BLANK_TICKET,
+      ...data,
+      section, row, seats,
+      qty,
+      cost:            cost.toString(),
+      costPerTicket:   costPerTicket.toString(),
+      buyingPlatform:  data.buyingPlatform || "Ticketmaster",
+      accountEmail:    data.accountEmail || "",
+    });
     setShowAddTicket(true);
     notify("Email parsed — review & save");
   };
 
-  const openSale = (ticketId) => { setSf({ ...BLANK_SALE, ticketId }); setShowAddSale(true); };
+  const openSale = (ticketId) => {
+    setSf({ ...BLANK_SALE, ticketId });
+    setShowAddSale(true);
+  };
 
   if (loading) return (
     <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f7f8fa", fontFamily: "'DM Sans', sans-serif" }}>
@@ -155,7 +203,8 @@ export default function App() {
       "--orange": "#f97316", "--blue": "#1a3a6e",
       "--green": "#059669", "--red": "#ef4444", "--yellow": "#f59e0b",
       "--display": "'DM Sans', sans-serif", "--body": "'DM Sans', sans-serif",
-      display: "flex", height: "100vh", fontFamily: "var(--body)", background: "var(--bg)", color: "var(--text)", overflow: "hidden"
+      display: "flex", height: "100vh", fontFamily: "var(--body)",
+      background: "var(--bg)", color: "var(--text)", overflow: "hidden",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&display=swap');
@@ -183,6 +232,7 @@ export default function App() {
       <Sidebar view={view} setView={setView} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Top bar */}
         <div style={{ background: "#ffffff", borderBottom: "0.5px solid #e2e6ea", padding: "0 28px", display: "flex", alignItems: "center", height: 52, flexShrink: 0, gap: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
           <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase" }}>Queud</span>
           <span style={{ fontSize: 11, color: "#e2e6ea" }}>/</span>
@@ -193,16 +243,69 @@ export default function App() {
           </div>
         </div>
 
+        {/* Page content */}
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-          {view === "dashboard" && <Dashboard tickets={tickets} sales={sales} setView={setView} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} />}
-          {view === "inventory" && <Inventory tickets={tickets} setTickets={setTickets} sales={sales} setSales={setSales} settings={settings} setShowAddTicket={setShowAddTicket} setEditingTicket={setEditingTicket} setTf={setTf} blankTicket={BLANK_TICKET} openSale={openSale} notify={notify} />}
-          {view === "sales" && <Sales tickets={tickets} sales={sales} setSales={setSales} updateSale={updateSale} setShowAddSale={setShowAddSale} />}
-          {view === "settings" && <Settings settings={settings} setSettings={setSettings} tickets={tickets} setTickets={setTickets} sales={sales} setSales={setSales} notify={notify} importParsed={importParsed} />}
+          {view === "dashboard" && (
+            <Dashboard
+              tickets={tickets} sales={sales} events={events}
+              setView={setView}
+              setShowAddTicket={setShowAddTicket}
+              setEditingTicket={setEditingTicket}
+              setTf={setTf} blankTicket={BLANK_TICKET}
+            />
+          )}
+          {view === "inventory" && (
+            <Inventory
+              tickets={tickets} setTickets={setTickets}
+              sales={sales} setSales={setSales}
+              events={events}
+              settings={settings}
+              setShowAddTicket={setShowAddTicket}
+              setEditingTicket={setEditingTicket}
+              setTf={setTf} blankTicket={BLANK_TICKET}
+              openSale={openSale} notify={notify}
+            />
+          )}
+          {view === "sales" && (
+            <Sales
+              tickets={tickets} sales={sales}
+              setSales={setSales} updateSale={updateSale}
+              linkTicketsToSale={linkTicketsToSale}
+              events={events}
+              setShowAddSale={setShowAddSale}
+              notify={notify}
+            />
+          )}
+          {view === "settings" && (
+            <Settings
+              settings={settings} setSettings={setSettings}
+              tickets={tickets} setTickets={setTickets}
+              sales={sales} setSales={setSales}
+              events={events} findOrCreateEvent={findOrCreateEvent}
+              notify={notify} importParsed={importParsed}
+            />
+          )}
         </div>
       </div>
 
-      {showAddTicket && <AddTicketModal tf={tf} setTf={setTf} editingTicket={editingTicket} setEditingTicket={setEditingTicket} setShowAddTicket={setShowAddTicket} saveTicket={saveTicket} settings={settings} />}
-      {showAddSale && <RecordSaleModal sf={sf} setSf={setSf} tickets={tickets} setShowAddSale={setShowAddSale} saveSale={saveSale} />}
+      {showAddTicket && (
+        <AddTicketModal
+          tf={tf} setTf={setTf}
+          editingTicket={editingTicket}
+          setEditingTicket={setEditingTicket}
+          setShowAddTicket={setShowAddTicket}
+          saveTicket={saveTicket}
+          settings={settings}
+        />
+      )}
+      {showAddSale && (
+        <RecordSaleModal
+          sf={sf} setSf={setSf}
+          tickets={tickets}
+          setShowAddSale={setShowAddSale}
+          saveSale={saveSale}
+        />
+      )}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 24, right: 24, background: toast.type === "err" ? "#fef2f2" : "#ffffff", color: toast.type === "err" ? "#ef4444" : "#0f172a", padding: "12px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, zIndex: 999, animation: "toastIn 0.25s ease", border: toast.type === "err" ? "1px solid #fecaca" : "1px solid #e2e6ea", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}>

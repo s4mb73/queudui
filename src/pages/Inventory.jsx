@@ -15,13 +15,10 @@ const STATUS_STYLES = {
 
 const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-// ── Pure helpers (defined outside component — no re-creation on every render) ──
-
 function fmtDate(d) {
   if (!d) return "—";
   const iso = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return `${parseInt(iso[3])} ${months[parseInt(iso[2])-1]} ${iso[1]}`;
-  // Extract date only — ignore any trailing time or separator
   const wordy = d.match(/(?:\w{3,}\s+)?(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})/i);
   if (wordy) return `${parseInt(wordy[1])} ${wordy[2]} ${wordy[3]}`;
   return d;
@@ -39,12 +36,11 @@ function fmtTime(t) {
     return `${String(h).padStart(2,"0")}:${min}`;
   }
   if (/^\d{1,2}:\d{2}$/.test(t.trim())) return t.trim();
-  return ""; // FIX: return "" not raw string — prevents "pm" bleed-through
+  return "";
 }
 
 function getTime(date, time) {
   if (time) return fmtTime(time);
-  // Strip separator before checking for embedded time
   const bare = (date || "").replace(/\s*[·•]\s*/, " ").trim();
   const embedded = bare.match(/(\d{1,2}:\d{2}\s*(?:am|pm)?)\s*$/i);
   return embedded ? fmtTime(embedded[1]) : "";
@@ -57,9 +53,9 @@ function venueClean(v) {
 function cleanRestriction(r) {
   if (!r) return r;
   return r
-    .replace(/\s*(?:Aisle\s*)?Seated\s*Ticket.*/i, '')  // strip "Seated Ticket" + anything after
-    .replace(/\s*Ticket.*/i, '')                           // strip bare "Ticket" + anything after
-    .replace(/\s*Section\s*\d+.*/i, '')                  // strip "Section NNN" + anything after
+    .replace(/\s*(?:Aisle\s*)?Seated\s*Ticket.*/i, '')
+    .replace(/\s*Ticket.*/i, '')
+    .replace(/\s*Section\s*\d+.*/i, '')
     .trim();
 }
 
@@ -68,16 +64,13 @@ function sectionSummary(sections) {
   const nums = sections.map(s => parseInt(s)).filter(n => !isNaN(n)).sort((a, b) => a - b);
   if (nums.length > 1) return `Sec ${nums[0]}–${nums[nums.length - 1]}`;
   if (nums.length === 1) return `Sec ${nums[0]}`;
-  // Non-numeric sections (e.g. "A", "B") — list up to 2
   return sections.slice(0, 2).map(s => `Sec ${s}`).join(" · ") + (sections.length > 2 ? ` +${sections.length - 2}` : "");
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
-
-export default function Inventory({ tickets, setTickets, sales, setSales, settings, setShowAddTicket, setEditingTicket, setTf, blankTicket, openSale, notify }) {
-  const [filterCat, setFilterCat]       = useState("All");
-  const [filterStatus, setFilterStatus] = useState("All");
-  const [searchQ, setSearchQ]           = useState("");
+export default function Inventory({ tickets, setTickets, sales, setSales, events, settings, setShowAddTicket, setEditingTicket, setTf, blankTicket, openSale, notify }) {
+  const [filterCat, setFilterCat]           = useState("All");
+  const [filterStatus, setFilterStatus]     = useState("All");
+  const [searchQ, setSearchQ]               = useState("");
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [multiSelected, setMultiSelected]   = useState({});
   const [expandedEvents, setExpandedEvents] = useState({});
@@ -97,9 +90,22 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
     return () => document.removeEventListener("mousedown", handle);
   }, [openStatusMenu]);
 
-  // ── Filtered tickets — memoised ──────────────────────────────────────────────
+  // Build event lookup map for category resolution
+  const eventMap = useMemo(() => {
+    const m = {};
+    (events || []).forEach(e => { m[e.id] = e; });
+    return m;
+  }, [events]);
+
+  // Resolve category from event table, fallback to ticket field
+  function getCategory(ticket) {
+    return eventMap[ticket.eventId]?.category || "Concert";
+  }
+
+  // ── Filtered tickets ──────────────────────────────────────────────────────
   const filteredTickets = useMemo(() => tickets.filter(t => {
-    if (filterCat !== "All" && t.category !== filterCat) return false;
+    const cat = getCategory(t);
+    if (filterCat !== "All" && cat !== filterCat) return false;
     if (filterStatus !== "All" && (t.status || "Unsold") !== filterStatus) return false;
     if (searchQ) {
       const q = searchQ.toLowerCase();
@@ -111,29 +117,33 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
         || (t.seats||"").toLowerCase().includes(q);
     }
     return true;
-  }), [tickets, filterCat, filterStatus, searchQ]);
+  }), [tickets, filterCat, filterStatus, searchQ, eventMap]);
 
-  // ── Event groups — memoised ──────────────────────────────────────────────────
+  // ── Event groups ──────────────────────────────────────────────────────────
   const eventGroups = useMemo(() => {
     const groups = {};
     filteredTickets.forEach(t => {
       const key = t.event + "||" + (t.date || "");
-      if (!groups[key]) groups[key] = { event: t.event, date: t.date, time: t.time, venue: t.venue, category: t.category, tickets: [] };
+      if (!groups[key]) groups[key] = {
+        event: t.event,
+        date: t.date,
+        time: t.time,
+        venue: t.venue,
+        category: getCategory(t),
+        tickets: [],
+      };
       groups[key].tickets.push(t);
     });
     return groups;
-  }, [filteredTickets]);
+  }, [filteredTickets, eventMap]);
 
-  const totalStock = useMemo(() => tickets.reduce((a, t) => a + (t.qtyAvailable ?? t.qty), 0), [tickets]);
+  const totalStock  = useMemo(() => tickets.reduce((a, t) => a + (t.qtyAvailable ?? t.qty), 0), [tickets]);
   const numSelected = Object.values(multiSelected).filter(Boolean).length;
 
-  // ── Order grouping — FIX: aggregates section/row across all tickets in order ─
   function getOrderGroups(eventTickets) {
     const orders = {};
     eventTickets.forEach(t => {
       const isStandingSec = t.isStanding || /standing|pitch|floor|general admission/i.test(t.section || "");
-      // For standing tickets, group by orderRef + section so different standing types
-      // (e.g. "Front GA South" vs "Rear Pitch") are always separate orders
       const key = isStandingSec && t.section
         ? (t.orderRef || t.id) + "||" + t.section
         : t.orderRef || t.id;
@@ -144,7 +154,6 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
       if (t.row)     orders[key].rows.add(t.row);
       orders[key].tickets.push(t);
     });
-    // Convert sets → sorted arrays, sort tickets by seat number
     Object.values(orders).forEach(o => {
       o.sections = [...o.sections].sort((a, b) => (parseInt(a)||0) - (parseInt(b)||0));
       o.rows     = [...o.rows].sort((a, b) => (parseInt(a)||0) - (parseInt(b)||0));
@@ -153,10 +162,10 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
     return orders;
   }
 
-  // ── Actions ──────────────────────────────────────────────────────────────────
-  const toggleSelect    = (id, e) => { e.stopPropagation(); setMultiSelected(s => ({ ...s, [id]: !s[id] })); };
-  const toggleAllEvent  = (tix) => { const all = tix.every(t => multiSelected[t.id]); const u = {}; tix.forEach(t => { u[t.id] = !all; }); setMultiSelected(s => ({ ...s, ...u })); };
-  const clearSelection  = () => setMultiSelected({});
+  // ── Actions ───────────────────────────────────────────────────────────────
+  const toggleSelect   = (id, e) => { e.stopPropagation(); setMultiSelected(s => ({ ...s, [id]: !s[id] })); };
+  const toggleAllEvent = (tix) => { const all = tix.every(t => multiSelected[t.id]); const u = {}; tix.forEach(t => { u[t.id] = !all; }); setMultiSelected(s => ({ ...s, ...u })); };
+  const clearSelection = () => setMultiSelected({});
 
   const updateStatus = (id, status, e) => {
     e.stopPropagation();
@@ -167,7 +176,6 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
 
   const delTicket = (id) => {
     setTickets(p => p.filter(t => t.id !== id));
-    setSales(p => p.filter(s => s.ticketId !== id));
     notify("Deleted");
   };
 
@@ -175,7 +183,6 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
     if (!window.confirm(`Delete ${numSelected} ticket${numSelected > 1 ? "s" : ""}?`)) return;
     const ids = new Set(Object.keys(multiSelected).filter(id => multiSelected[id]));
     setTickets(p => p.filter(t => !ids.has(t.id)));
-    setSales(p => p.filter(s => !ids.has(s.ticketId)));
     setMultiSelected({});
     notify(`Deleted ${ids.size} tickets`);
   };
@@ -184,24 +191,29 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
     const ids = new Set(Object.keys(multiSelected).filter(id => multiSelected[id]));
     const sel = tickets.filter(t => ids.has(t.id));
     const rows = [
-      ["Event","Date","Venue","Section","Row","Seat","Order Ref","Account","Cost (USD)","Original Amount","Currency","Status","Restrictions"],
-      ...sel.map(t => [t.event,t.date,t.venue,t.section,t.row,t.seats,t.orderRef,t.accountEmail,t.costPrice,t.originalAmount,t.originalCurrency,t.status,t.restrictions])
+      ["Event","Date","Venue","Section","Row","Seat","Order Ref","Account Email","Buying Platform","Cost (GBP)","Cost Per Ticket","Status","Restrictions","Listed On"],
+      ...sel.map(t => [
+        t.event, t.date, t.venue, t.section, t.row, t.seats,
+        t.orderRef, t.accountEmail, t.buyingPlatform,
+        t.cost, t.costPerTicket,
+        t.status, t.restrictions, t.listedOn,
+      ])
     ];
     const csv = rows.map(r => r.map(c => `"${(c??'').toString().replace(/"/g,'""')}"`).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `queud-export-${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `queud-inventory-${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     notify(`Exported ${sel.length} tickets`);
   };
 
   const openEdit = (t) => {
     setEditingTicket(t);
-    setTf({ ...t, costPrice: t.costPrice.toString(), qty: t.qty });
+    setTf({ ...t, cost: t.cost.toString(), costPerTicket: t.costPerTicket.toString(), qty: t.qty });
     setShowAddTicket(true);
   };
 
-  // ── Render helpers ────────────────────────────────────────────────────────────
+  // ── Render helpers ─────────────────────────────────────────────────────────
   const statusPill = (tix) => {
     const statuses = [...new Set(tix.map(t => t.status || "Unsold"))];
     const s  = statuses.length === 1 ? statuses[0] : "Multiple";
@@ -214,7 +226,6 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
   };
 
   const qtyBox = (n, available) => (
-    // Show available in orange, total in grey if different
     <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
       <div style={{ background: "rgba(249,115,22,0.1)", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700, color: "#f97316", textAlign: "center", minWidth: 28, fontVariantNumeric: "tabular-nums" }}>
         {available ?? n}
@@ -319,7 +330,7 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
           const totalQty     = eventTickets.length;
           const totalAvail   = eventTickets.filter(t => (t.qtyAvailable ?? t.qty) > 0 && !["Sold","Delivered","Completed"].includes(t.status)).length;
           const totalSold    = eventTickets.filter(t => ["Sold","Delivered","Completed"].includes(t.status)).length;
-          const totalCost    = eventTickets.reduce((a, t) => a + t.costPrice, 0);
+          const totalCost    = eventTickets.reduce((a, t) => a + (t.cost || 0), 0);
           const orderGroups  = getOrderGroups(eventTickets);
           const sections     = [...new Set(eventTickets.map(t => t.section).filter(Boolean))];
           const someSelected = eventTickets.some(t => multiSelected[t.id]);
@@ -330,25 +341,22 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
           return (
             <div key={eKey} style={{ borderBottom: gi < Object.keys(eventGroups).length - 1 ? "0.5px solid #f0f0f3" : "none" }}>
 
-              {/* ── Event row ── */}
+              {/* Event row */}
               <div onClick={() => setExpandedEvents(s => ({ ...s, [eKey]: !s[eKey] }))}
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", cursor: "pointer", background: someSelected ? "#fffbf7" : "white", borderLeft: `3px solid ${accent}`, transition: "background 0.1s" }}
                 onMouseEnter={e => { if (!someSelected) e.currentTarget.style.background = "#fafafa"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = someSelected ? "#fffbf7" : "white"; }}>
 
-                {/* Checkbox */}
                 <div onClick={e => { e.stopPropagation(); toggleAllEvent(eventTickets); }}
                   style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px solid ${allSelected ? "#1a3a6e" : someSelected ? "#1a3a6e" : "#d1d5db"}`, background: allSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   {allSelected  && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
                   {!allSelected && someSelected && <span style={{ color: "#1a3a6e", fontSize: 9 }}>—</span>}
                 </div>
 
-                {/* Category icon */}
                 <div style={{ width: 34, height: 34, borderRadius: 8, background: eventGroup.category === "Sport" ? "rgba(26,58,110,0.08)" : "rgba(124,58,237,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
                   {eventGroup.category === "Sport" ? "⚽" : "🎵"}
                 </div>
 
-                {/* Event name + venue/section summary */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eventGroup.event}</div>
                   <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
@@ -356,33 +364,30 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                   </div>
                 </div>
 
-                {/* Date + time */}
                 <div style={{ fontSize: 12, color: "#6b7280", width: 90, flexShrink: 0 }}>
                   {fmtDate(eventGroup.date)}{timeStr ? " · " + timeStr : ""}
                 </div>
 
                 <div style={{ fontSize: 12, color: "#6b7280", width: 60, flexShrink: 0 }}>{Object.keys(orderGroups).length} orders</div>
-                {/* FIX: show available count, not total — with /total if some sold */}
                 <div style={{ width: 60, flexShrink: 0 }}>{qtyBox(totalQty, totalAvail)}</div>
                 <div style={{ width: 32, flexShrink: 0 }}>{soldBox(totalSold)}</div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", width: 80, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(totalCost)}</div>
                 <div style={{ width: 80, flexShrink: 0 }}>{statusPill(eventTickets)}</div>
-                {/* Consistent chevron — rotated CSS rather than different characters */}
                 <div style={{ width: 16, flexShrink: 0, fontSize: 12, color: "#9ca3af", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</div>
               </div>
 
-              {/* ── Order rows (expanded) ── */}
+              {/* Order rows */}
               {isExpanded && Object.entries(orderGroups)
                 .sort(([, a], [, b]) => {
                   const secA = parseInt(a.sections[a.sections.length - 1]) || 0;
                   const secB = parseInt(b.sections[b.sections.length - 1]) || 0;
-                  if (secB !== secA) return secB - secA; // highest section first
+                  if (secB !== secA) return secB - secA;
                   const rowA = parseInt(a.rows[a.rows.length - 1]) || 0;
                   const rowB = parseInt(b.rows[b.rows.length - 1]) || 0;
-                  if (rowB !== rowA) return rowB - rowA; // then highest row first
+                  if (rowB !== rowA) return rowB - rowA;
                   const seatA = parseInt(a.tickets[a.tickets.length - 1]?.seats) || 0;
                   const seatB = parseInt(b.tickets[b.tickets.length - 1]?.seats) || 0;
-                  return seatB - seatA; // then highest seat first
+                  return seatB - seatA;
                 })
                 .map(([oKey, orderGroup]) => {
                 const isOrderExpanded = expandedOrders[eKey + "||" + oKey];
@@ -390,7 +395,7 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                 const oQty   = orderTickets.length;
                 const oAvail = orderTickets.filter(t => (t.qtyAvailable ?? t.qty) > 0 && !["Sold","Delivered","Completed"].includes(t.status)).length;
                 const oSold  = orderTickets.filter(t => ["Sold","Delivered","Completed"].includes(t.status)).length;
-                const oCost  = orderTickets.reduce((a, t) => a + t.costPrice, 0);
+                const oCost  = orderTickets.reduce((a, t) => a + (t.cost || 0), 0);
                 const someOrd = orderTickets.some(t => multiSelected[t.id]);
                 const allOrd  = orderTickets.every(t => multiSelected[t.id]);
 
@@ -401,8 +406,6 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
 
                 const restriction  = orderTickets.find(t => t.restrictions)?.restrictions;
                 const isStandingOrder = orderTickets.some(t => t.isStanding || /standing|pitch|floor|general admission/i.test(t.section || ""));
-                // isRestricted = view-affecting restriction (red highlight) — never show for standing (section chip covers it)
-                // hasRestriction = any restriction including standing (chip only) — suppress for standing
                 const isRestricted = !isStandingOrder && restriction && /restrict|side.?view|limited.?view|partial.?view|obstructed|severely/i.test(restriction);
                 const hasRestriction = !isStandingOrder && !!restriction;
 
@@ -413,14 +416,12 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                       onMouseEnter={e => { if (!someOrd) e.currentTarget.style.background = "#f4f4f6"; }}
                       onMouseLeave={e => { e.currentTarget.style.background = someOrd ? "#fffbf7" : "#f9f9fb"; }}>
 
-                      {/* Order checkbox */}
                       <div onClick={e => { e.stopPropagation(); const u = {}; orderTickets.forEach(t => { u[t.id] = !allOrd; }); setMultiSelected(s => ({ ...s, ...u })); }}
                         style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${allOrd ? "#1a3a6e" : someOrd ? "#1a3a6e" : "#d1d5db"}`, background: allOrd ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                         {allOrd  && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
                         {!allOrd && someOrd && <span style={{ color: "#1a3a6e", fontSize: 8 }}>—</span>}
                       </div>
 
-                      {/* Seat chips — FIX: uses aggregated sections/rows */}
                       <div style={{ display: "flex", alignItems: "center", gap: 5, flex: 1, minWidth: 0, flexWrap: "wrap" }}>
                         {orderGroup.sections.map(sec => {
                           const isStandingSec = /standing|pitch|floor|general admission|ga\b/i.test(sec);
@@ -455,13 +456,13 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                       <div style={{ width: 16, flexShrink: 0, fontSize: 12, color: "#9ca3af", transform: isOrderExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</div>
                     </div>
 
-                    {/* ── Seat rows ── */}
+                    {/* Seat rows */}
                     {isOrderExpanded && (
                       <div style={{ background: "#f7f8fa", borderTop: "0.5px solid #f0f0f3" }}>
                         {orderTickets.map((t, ti) => {
                           const isSelected  = !!multiSelected[t.id];
                           const tRestricted = t.restrictions && /restrict|side.?view|limited.?view|partial.?view|obstructed|severely/i.test(t.restrictions);
-                          const s     = t.status || "Unsold";
+                          const s      = t.status || "Unsold";
                           const sStyle = STATUS_STYLES[s];
                           const isStandingTicket = t.isStanding || /standing|pitch|floor|general admission/i.test(t.section || "");
                           const seatLabel = isStandingTicket ? (t.section || "Standing") : t.seats ? `Seat ${t.seats}` : "No seat";
@@ -490,9 +491,18 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
                               )}
 
                               <div style={{ flex: 1 }} />
-                              <div style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", width: 70, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(t.costPrice)}</div>
 
-                              {/* Status dropdown — with outside-click ref */}
+                              {/* Cost per ticket */}
+                              <div style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", width: 70, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(t.cost)}</div>
+
+                              {/* Listed on badge */}
+                              {t.listedOn && (
+                                <div style={{ fontSize: 10, color: "#1a3a6e", background: "rgba(26,58,110,0.07)", border: "0.5px solid rgba(26,58,110,0.15)", borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
+                                  {t.listedOn}
+                                </div>
+                              )}
+
+                              {/* Status dropdown */}
                               <div style={{ position: "relative", width: 90, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                                 <div onClick={() => setOpenStatusMenu(openStatusMenu === t.id ? null : t.id)}
                                   style={{ display: "inline-flex", alignItems: "center", gap: 4, background: sStyle.bg, color: sStyle.text, borderRadius: 20, padding: "3px 9px", fontSize: 11, fontWeight: 600, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
@@ -537,10 +547,14 @@ export default function Inventory({ tickets, setTickets, sales, setSales, settin
       </div>
 
       {selectedTicket && (
-        <TicketDetailModal ticket={selectedTicket} onClose={() => setSelectedTicket(null)}
+        <TicketDetailModal
+          ticket={selectedTicket}
+          event={eventMap[selectedTicket.eventId]}
+          onClose={() => setSelectedTicket(null)}
           onEdit={() => { setSelectedTicket(null); openEdit(selectedTicket); }}
           onSell={() => { setSelectedTicket(null); openSale(selectedTicket.id); }}
-          fmt={fmt} fmtCurrency={fmtCurrency} />
+          fmt={fmt} fmtCurrency={fmtCurrency}
+        />
       )}
     </div>
   );
