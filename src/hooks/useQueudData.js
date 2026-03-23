@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
-// ── Events ───────────────────────────────────────────────────────────────────
-
 function dbToEvent(row) {
   return {
     id:        row.id,
@@ -15,13 +13,11 @@ function dbToEvent(row) {
   };
 }
 
-// ── Tickets ──────────────────────────────────────────────────────────────────
-
 function dbToTicket(row) {
   return {
     id:             row.id,
     eventId:        row.event_id || '',
-    event:          row.event || '',           // denormalised for display
+    event:          row.event || '',
     buyingPlatform: row.buying_platform || 'Ticketmaster',
     date:           row.date || '',
     time:           row.time || '',
@@ -70,8 +66,6 @@ function ticketToDb(t) {
   };
 }
 
-// ── Sales ────────────────────────────────────────────────────────────────────
-
 function dbToSale(row, ticketIdsBySaleId) {
   return {
     id:              row.id,
@@ -114,25 +108,20 @@ function saleToDb(s) {
   };
 }
 
-// ── Main hook ────────────────────────────────────────────────────────────────
-
 const POLL_INTERVAL_MS = 30_000;
 
 export function useQueudData() {
-  const [events, setEventsState]         = useState([]);
-  const [tickets, setTicketsState]       = useState([]);
-  const [sales, setSalesState]           = useState([]);
-  const [settings, setSettingsState]     = useState({ gmailAccounts: [], openAiKey: '', extra: {} });
-  const [loading, setLoading]            = useState(true);
-  const [error, setError]                = useState(null);
+  const [events, setEventsState]     = useState([]);
+  const [tickets, setTicketsState]   = useState([]);
+  const [sales, setSalesState]       = useState([]);
+  const [settings, setSettingsState] = useState({ gmailAccounts: [], openAiKey: '', extra: {} });
+  const [loading, setLoading]        = useState(true);
+  const [error, setError]            = useState(null);
 
   const localMutationIds = useRef(new Set());
 
-  // ── Load sale_tickets junction ────────────────────────────────────────────
   async function loadSaleTicketMap() {
-    const { data, error } = await supabase
-      .from('sale_tickets')
-      .select('sale_id, ticket_id');
+    const { data, error } = await supabase.from('sale_tickets').select('sale_id, ticket_id');
     if (error) { console.warn('sale_tickets load error:', error.message); return {}; }
     const map = {};
     (data || []).forEach(({ sale_id, ticket_id }) => {
@@ -250,10 +239,8 @@ export function useQueudData() {
   // ── Events CRUD ───────────────────────────────────────────────────────────
 
   const findOrCreateEvent = useCallback(async ({ name, venue, date, time, category }) => {
-    // Normalise venue for matching (strip city suffix)
     const venueNorm = (venue || '').split(',')[0].trim();
 
-    // Check local state first
     const existing = events.find(e =>
       e.date === date &&
       e.name.toLowerCase() === name.toLowerCase() &&
@@ -261,7 +248,6 @@ export function useQueudData() {
     );
     if (existing) return existing.id;
 
-    // Check DB
     const { data: found } = await supabase
       .from('events')
       .select('id')
@@ -278,7 +264,6 @@ export function useQueudData() {
       return found.id;
     }
 
-    // Create new event
     const newId = Math.random().toString(36).slice(2, 10);
     const { error } = await supabase.from('events').insert({
       id: newId, name, venue: venueNorm, date, time,
@@ -310,7 +295,12 @@ export function useQueudData() {
 
       if (toUpsert.length > 0) {
         supabase.from('tickets').upsert(toUpsert.map(ticketToDb)).then(({ error }) => {
-          if (error) console.error('Ticket upsert error:', error);
+          if (error) {
+            console.error('Ticket upsert error:', error);
+          } else {
+            // Clear mutation lock once DB confirms — allows poll to pick up future server changes
+            toUpsert.forEach(t => localMutationIds.current.delete(t.id));
+          }
         });
       }
       if (toDelete.length > 0) {
@@ -347,7 +337,12 @@ export function useQueudData() {
 
       if (toUpsert.length > 0) {
         supabase.from('sales').upsert(toUpsert.map(saleToDb)).then(({ error }) => {
-          if (error) console.error('Sale upsert error:', error);
+          if (error) {
+            console.error('Sale upsert error:', error);
+          } else {
+            // Clear mutation lock once DB confirms
+            toUpsert.forEach(s => localMutationIds.current.delete(s.id));
+          }
         });
       }
       if (toDelete.length > 0) {
@@ -366,7 +361,6 @@ export function useQueudData() {
     setSalesState(prev => prev.map(s => s.id === saleId ? { ...s, ...patch } : s));
     localMutationIds.current.add(saleId);
 
-    // Convert camelCase patch to snake_case for DB
     const dbPatch = {};
     if (patch.saleStatus    !== undefined) dbPatch.sale_status    = patch.saleStatus;
     if (patch.customerEmail !== undefined) dbPatch.customer_email = patch.customerEmail;
@@ -374,7 +368,12 @@ export function useQueudData() {
 
     if (Object.keys(dbPatch).length > 0) {
       supabase.from('sales').update(dbPatch).eq('id', saleId).then(({ error }) => {
-        if (error) console.error('updateSale error:', error);
+        if (error) {
+          console.error('updateSale error:', error);
+        } else {
+          // Clear mutation lock once DB confirms
+          localMutationIds.current.delete(saleId);
+        }
       });
     }
   }, []);
