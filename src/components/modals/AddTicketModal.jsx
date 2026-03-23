@@ -2,7 +2,7 @@ import { Modal, Field, Input, Select } from "../ui";
 import { fmt, fmtCurrency, PLATFORMS, SPORT_TYPES, MUSIC_TYPES } from "../../utils/format";
 
 export function AddTicketModal({ tf, setTf, editingTicket, setEditingTicket, setShowAddTicket, saveTicket, settings }) {
-  const CURRENCIES = ["USD", "GBP", "EUR", "CAD", "AUD"];
+  const CURRENCIES = ["GBP", "USD", "EUR", "CAD", "AUD"];
   return (
     <Modal title={editingTicket ? "Edit Ticket" : "Add Tickets to Inventory"} onClose={() => { setShowAddTicket(false); setEditingTicket(null); }}>
       <div style={{ display: "grid", gap: 16 }}>
@@ -52,11 +52,15 @@ export function AddTicketModal({ tf, setTf, editingTicket, setEditingTicket, set
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <Field label="Quantity *"><Input value={tf.qty} onChange={v => setTf(f => ({ ...f, qty: v }))} type="number" min="1" /></Field>
-          <Field label="Amount Paid *"><Input value={tf.costPrice} onChange={v => setTf(f => ({ ...f, costPrice: v }))} type="number" step="0.01" placeholder="0.00" /></Field>
+          <Field label="Quantity *">
+            <Input value={tf.qty} onChange={v => setTf(f => ({ ...f, qty: v }))} type="number" min="1" />
+          </Field>
+          <Field label="Amount Paid (£) *">
+            <Input value={tf.cost} onChange={v => setTf(f => ({ ...f, cost: v }))} type="number" step="0.01" placeholder="0.00" />
+          </Field>
           <Field label="Price per Ticket">
             <div style={{ background: "#f7f8fa", border: "1.5px solid #1c2840", padding: "9px 13px", borderRadius: 8, fontSize: 13, color: "#0f172a", fontWeight: 700 }}>
-              {tf.costPrice && tf.qty ? fmt(parseFloat(tf.costPrice) / parseInt(tf.qty)) : "—"}
+              {tf.cost && tf.qty ? fmt(parseFloat(tf.cost) / parseInt(tf.qty)) : "—"}
             </div>
           </Field>
         </div>
@@ -65,11 +69,12 @@ export function AddTicketModal({ tf, setTf, editingTicket, setEditingTicket, set
           <Field label="Order / Booking Ref"><Input value={tf.orderRef} onChange={v => setTf(f => ({ ...f, orderRef: v }))} placeholder="e.g. 19-21054/WES" /></Field>
           <Field label="Restrictions / Ticket Type"><Input value={tf.restrictions || ""} onChange={v => setTf(f => ({ ...f, restrictions: v }))} placeholder="e.g. Restricted Side View" /></Field>
         </div>
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
           <Field label="Notes"><Input value={tf.notes} onChange={v => setTf(f => ({ ...f, notes: v }))} placeholder="Optional" /></Field>
         </div>
 
-        {(tf.originalCurrency && tf.originalCurrency !== "USD" && tf.originalAmount > 0) ? (
+        {(tf.originalCurrency && tf.originalCurrency !== "GBP" && tf.originalAmount > 0) ? (
           <div style={{ background: "rgba(26,58,110,0.06)", border: "1px solid rgba(46,124,246,0.2)", borderRadius: 8, padding: "12px 16px" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", marginBottom: 10, letterSpacing: "0.5px", textTransform: "uppercase" }}>Currency Conversion</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
@@ -82,15 +87,15 @@ export function AddTicketModal({ tf, setTf, editingTicket, setEditingTicket, set
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a" }}>×{parseFloat(tf.exchangeRate || 1).toFixed(4)}</div>
               </div>
               <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px" }}>USD</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#f97316" }}>{fmt(tf.costPrice)}</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px" }}>GBP</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#f97316" }}>{fmt(tf.cost)}</div>
               </div>
             </div>
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Original Currency">
-              <Select value={tf.originalCurrency || "USD"} onChange={v => setTf(f => ({ ...f, originalCurrency: v }))}>
+              <Select value={tf.originalCurrency || "GBP"} onChange={v => setTf(f => ({ ...f, originalCurrency: v }))}>
                 {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
               </Select>
             </Field>

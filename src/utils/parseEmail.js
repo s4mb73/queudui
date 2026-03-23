@@ -52,7 +52,7 @@ export function stripEmailForAI(raw) {
     const t = l.trim();
     if (!t || t.length < 1) return false;
     if (/[£€$]\s*[\d,]+/.test(t)) return true;
-    if (/seat|row|section|block|stand|area|venue|total|order|booking|confirm|ticket|restrict|standing|pitch/i.test(t)) return true;
+    if (/seat|row|section|block|stand|area|venue|total|order|booking|confirm|ticket|restrict|standing|pitch|vip|admission/i.test(t)) return true;
     if (t.length > 300 && !/[A-Za-z\s]{10}/.test(t)) return false;
     if (/^\s*(?:padding|margin|font-size|background|border-radius|display|width|height|color|text-align)\s*:/i.test(t)) return false;
     if (/^\s*(?:@font|@media|\{|\}|\.)/.test(t)) return false;
@@ -141,42 +141,32 @@ export function parseLiverpoolEmail(raw) {
   const totalPaid = extractCost(text);
 
   const tickets = [];
-
   const blocks = text.split(/(?=\bStand:)/i);
   const splitBlocks = blocks.length > 1 ? blocks : text.split(/(?=\bArea:)/i);
 
   splitBlocks.forEach(block => {
     if (!/Area:|Row:|Seat:/i.test(block)) return;
-
     const standMatch = block.match(/Stand:\s*([^\n\r/]{3,60})/i);
     const areaMatch  = block.match(/Area:\s*([A-Z0-9]+)/i);
     const rowMatch   = block.match(/Row:\s*(\d+)/i);
     const seatMatch  = block.match(/Seat:\s*(\d+)/i);
-
     const priceMatches = [...block.matchAll(/£\s*([\d]+\.[\d]{2})/g)]
-      .map(m => parseFloat(m[1]))
-      .filter(v => v >= 5 && v < 1000);
+      .map(m => parseFloat(m[1])).filter(v => v >= 5 && v < 1000);
     const costPrice = priceMatches.length > 0 ? priceMatches[0] : 0;
-
     const restrictionMatch = block.match(/(Severely Restricted View|Restricted View|Restricted Side View|Partial View|Obstructed View|Limited View)/i);
-
     const row  = rowMatch  ? rowMatch[1].trim()  : '';
     const seat = seatMatch ? seatMatch[1].trim() : '';
-
     if (row || seat) {
       tickets.push({
         event, date, time,
         venue: 'Anfield Stadium, Liverpool',
-        section:      areaMatch         ? areaMatch[1].trim()                       : '',
-        row, seats: seat,
-        qty: 1,
+        section:      areaMatch        ? areaMatch[1].trim()                       : '',
+        row, seats: seat, qty: 1,
         costPrice:    costPrice > 0 ? costPrice : (totalPaid > 0 ? totalPaid : 0),
         orderRef,
-        restrictions: restrictionMatch  ? restrictionMatch[1].trim()                : '',
-        notes:        standMatch        ? standMatch[1].trim().replace(/\s+/g, ' ') : '',
-        isStanding: false,
-        category: 'Sport',
-        confidence: 'high',
+        restrictions: restrictionMatch ? restrictionMatch[1].trim()                : '',
+        notes:        standMatch       ? standMatch[1].trim().replace(/\s+/g, ' ') : '',
+        isStanding: false, category: 'Sport', confidence: 'high',
       });
     }
   });
@@ -184,29 +174,22 @@ export function parseLiverpoolEmail(raw) {
   if (tickets.length === 0) {
     const areaMatches = [...text.matchAll(/Area:\s*([A-Z0-9]+)\s*\/\s*Row:\s*(\d+)\s*\/\s*Seat:\s*(\d+)/gi)];
     const priceMatches = [...text.matchAll(/£\s*([\d]+\.[\d]{2})/g)]
-      .map(m => parseFloat(m[1]))
-      .filter(v => v >= 5 && v < 1000);
+      .map(m => parseFloat(m[1])).filter(v => v >= 5 && v < 1000);
     areaMatches.forEach((m, i) => {
       tickets.push({
-        event, date, time,
-        venue: 'Anfield Stadium, Liverpool',
-        section: m[1].trim(), row: m[2].trim(), seats: m[3].trim(),
-        qty: 1,
+        event, date, time, venue: 'Anfield Stadium, Liverpool',
+        section: m[1].trim(), row: m[2].trim(), seats: m[3].trim(), qty: 1,
         costPrice: priceMatches[i] ?? (totalPaid > 0 ? totalPaid / Math.max(areaMatches.length, 1) : 0),
-        orderRef, restrictions: '', isStanding: false,
-        category: 'Sport', confidence: 'high',
+        orderRef, restrictions: '', isStanding: false, category: 'Sport', confidence: 'high',
       });
     });
   }
 
   if (tickets.length === 0) {
     tickets.push({
-      event, date, time,
-      venue: 'Anfield Stadium, Liverpool',
-      section: '', row: '', seats: '',
-      qty: 1, costPrice: totalPaid, orderRef,
-      restrictions: '', isStanding: false,
-      category: 'Sport', confidence: 'medium',
+      event, date, time, venue: 'Anfield Stadium, Liverpool',
+      section: '', row: '', seats: '', qty: 1, costPrice: totalPaid, orderRef,
+      restrictions: '', isStanding: false, category: 'Sport', confidence: 'medium',
     });
   }
 
@@ -223,19 +206,34 @@ export function parseLiverpoolEmail(raw) {
 
 // ── Extract HTML part from multipart/alternative emails ──────────────────────
 function extractHtmlPart(raw) {
-  // Look for Content-Type: text/html boundary part and extract it
   const htmlPartM = raw.match(/Content-Type:\s*text\/html[^\n]*\n(?:Content-Transfer-Encoding:[^\n]*\n)?\n([\s\S]+?)(?=\n--|\n--[^\n]+--\s*$|$)/i);
   if (htmlPartM) return htmlPartM[1];
-  // Fallback: if raw contains full HTML doc, return from <!DOCTYPE or <html
   const htmlStartM = raw.match(/(<!DOCTYPE html[\s\S]+|<html[\s\S]+)/i);
   if (htmlStartM) return htmlStartM[1];
+  return null;
+}
+
+// ── Extract named ticket type from TM Order Summary ───────────────────────────
+// Handles VIP Ticket, Hospitality Package, Premium Ticket etc.
+// These have no Sec/Row/Seat structure but are NOT standing — they get their
+// own section label (e.g. "VIP Ticket").
+function extractTicketTypeName(text) {
+  // Search within the Order Summary block where ticket type labels appear
+  const orderSummaryBlock = text.match(/Order\s+Summary[\s\S]{0,2000}?Payment\s+Summary/i);
+  const searchIn = orderSummaryBlock ? orderSummaryBlock[0] : text;
+
+  // Match named ticket types — NOT "Mobile Ticket" (that's delivery method)
+  const namedTypeM = searchIn.match(
+    /\b((?:VIP|Hospitality|Premium|Platinum|Gold|Silver|Bronze|Club|Executive|Lounge|Padded\s+Seat|Super\s+Pit|Track\s+Club)[^\n\r]{0,30}?(?:Ticket|Package|Admission|Access|Experience))\b/i
+  );
+  if (namedTypeM) return namedTypeM[1].replace(/\s+/g, ' ').trim().substring(0, 60);
+
   return null;
 }
 
 // ── Ticketmaster UK parser ────────────────────────────────────────────────────
 // Returns ARRAY of tickets — one per seat
 export function parseTicketmasterEmail(raw) {
-  // For multipart emails, prefer the HTML part which has all the structured data
   const htmlPart = extractHtmlPart(raw);
   const text = htmlPart ? stripHtml(htmlPart) : (isHtmlEmail(raw) ? stripHtml(raw) : raw);
 
@@ -260,11 +258,9 @@ export function parseTicketmasterEmail(raw) {
   }
 
   // ── Date & time ────────────────────────────────────────────────────────────
-  // Try UK format first: "Sun 24 May 2026" with optional "• 11:00 am"
   const ukDateTimeM = text.match(
     /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})(?:[^a-z0-9]*(\d{1,2}:\d{2}\s*(?:am|pm)))?/i
   );
-  // US format: "Fri · Apr 03, 2026"
   const usDateM = text.match(
     /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s*[·•\-]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/i
   );
@@ -280,18 +276,15 @@ export function parseTicketmasterEmail(raw) {
   }
 
   // ── Venue ──────────────────────────────────────────────────────────────────
-  // Priority 1: contains a venue keyword
   const venueKeywordM = text.match(
     /([A-Z][a-zA-Z0-9\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater|Amphitheater|Field|Garden|Country Park))[,\s]*/i
   );
-  // Priority 2: "Venue Name, City" pattern (two capitalised words/phrases separated by comma)
   const venueCityM = !venueKeywordM && text.match(
     /\n([A-Z][a-zA-Z\s]{3,40},\s*[A-Z][a-zA-Z\s]{2,30})\n/
   );
 
   let venue = '';
   if (venueKeywordM) {
-    // Keep "Venue Name, City" — only strip direction markers like " — North Stand"
     venue = venueKeywordM[0].replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 60);
   } else if (venueCityM) {
     venue = venueCityM[1].trim().substring(0, 60);
@@ -300,20 +293,17 @@ export function parseTicketmasterEmail(raw) {
   const orderRef = extractOrderRef(text);
   const category = detectCategory(text);
 
-  // ── Qty — match "2x Mobile Ticket" anywhere in text ───────────────────────
+  // ── Qty ────────────────────────────────────────────────────────────────────
   const mobileMatch = text.match(/(\d+)\s*[x×]\s*(?:Mobile\s*)?Ticket/i);
   let qty = mobileMatch ? parseInt(mobileMatch[1]) : 1;
   if (isNaN(qty) || qty < 1) qty = 1;
 
   // ── Cost ───────────────────────────────────────────────────────────────────
-  // Priority 1: per-ticket price "£40.00 x2" in payment summary
   const perTicketM = text.match(/[£$€]([\d,]+\.?\d*)\s*[x×]\s*(\d+)/i)
     || text.match(/(\d+)\s*[x×]\s*[£$€]([\d,]+\.?\d*)/i);
   let totalCost = 0;
   let costPerTicket = 0;
   if (perTicketM) {
-    // Shape 1: £100.00 x2 → groups [_, "100.00", "2"]
-    // Shape 2: 2 x £100.00 → groups [_, "2", "100.00"] — check which is the price
     const g1 = parseFloat((perTicketM[1] || '').replace(/,/g, ''));
     const g2 = parseFloat((perTicketM[2] || '').replace(/,/g, ''));
     if (g1 > g2) {
@@ -329,15 +319,28 @@ export function parseTicketmasterEmail(raw) {
     costPerTicket = qty > 0 ? parseFloat((totalCost / qty).toFixed(2)) : totalCost;
   }
 
-  // ── Standing / GA detection ────────────────────────────────────────────────
+  // ── Seated structure check ─────────────────────────────────────────────────
   const hasSeatStructure = /(?:Sec(?:tion)?|Block)\s*\d+|Row\s*\d+|\bSeat[s]?\s*\d+/i.test(text);
 
-  // Look for GA/standing ticket type labels used by Ticketmaster UK
-  // e.g. "General Admission Pot 3", "Unreserved Standing", "Pitch Standing"
+  // ── Named ticket type — VIP, Hospitality, Premium, etc. ───────────────────
+  // Must check BEFORE standing detection. Named types have no seat structure
+  // but are not standing — they get their own section label.
+  const namedTicketType = !hasSeatStructure ? extractTicketTypeName(text) : null;
+
+  if (namedTicketType) {
+    return Array.from({ length: qty }, (_, i) => ({
+      event, date, time, venue,
+      section: namedTicketType, row: '', seats: String(i + 1),
+      qty: 1, costPrice: costPerTicket, orderRef,
+      restrictions: '',
+      isStanding: false, category, confidence: 'high',
+    }));
+  }
+
+  // ── GA / Standing detection ────────────────────────────────────────────────
   const gaLabelM = text.match(
     /(General\s+Admission[^\n\r]{0,40}|(?:Unreserved|Rear|Front|Pitch|Floor|Festival)\s+Standing[^\n\r]{0,20}|Standing\s+Only[^\n\r]{0,20})/i
   );
-
   const isStanding = !hasSeatStructure && (
     !!gaLabelM || isStandingTicket(text.substring(0, 500))
   );
@@ -374,7 +377,6 @@ export function parseTicketmasterEmail(raw) {
   let m;
   const inlineWithRow    = /Sec(?:tion)?\s*(\d+)[\s·•,]+Row\s*(\d+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
   const inlineWithoutRow = /Sec(?:tion)?\s*(\d+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
-  const seatRangeMatch   = text.match(/Seat[s]?\s*(\d+)\s*[-–]\s*(\d+)/i);
 
   while ((m = inlineWithRow.exec(text)) !== null) pushSeats(m[1].trim(), m[2].trim(), m[3]);
   if (tickets.length === 0) {
@@ -485,13 +487,13 @@ export function parseEmail(raw, site) {
     : '';
 
   let qty = 1;
-  const mobileMatch       = text.match(/(\d+)\s*x\s*(?:Mobile\s*)?Ticket/i);
-  const qtyMatch          = text.match(/(?:qty|quantity)[:\s]+(\d+)/i);
-  const seatRangeMatch    = text.match(/Seat[s]?\s*(\d+)\s*[-–]\s*(\d+)/i);
-  const ticketsCountMatch = text.match(/(\d+)\s*(?:x\s*)?(?:adult\s|general\s|standing\s|seated\s)?tickets?\b/i);
-  if (mobileMatch)         qty = parseInt(mobileMatch[1]);
-  else if (qtyMatch)       qty = parseInt(qtyMatch[1]);
-  else if (seatRangeMatch) qty = Math.abs(parseInt(seatRangeMatch[2]) - parseInt(seatRangeMatch[1])) + 1;
+  const mobileMatch2       = text.match(/(\d+)\s*x\s*(?:Mobile\s*)?Ticket/i);
+  const qtyMatch           = text.match(/(?:qty|quantity)[:\s]+(\d+)/i);
+  const seatRangeMatch2    = text.match(/Seat[s]?\s*(\d+)\s*[-–]\s*(\d+)/i);
+  const ticketsCountMatch  = text.match(/(\d+)\s*(?:x\s*)?(?:adult\s|general\s|standing\s|seated\s)?tickets?\b/i);
+  if (mobileMatch2)         qty = parseInt(mobileMatch2[1]);
+  else if (qtyMatch)        qty = parseInt(qtyMatch[1]);
+  else if (seatRangeMatch2) qty = Math.abs(parseInt(seatRangeMatch2[2]) - parseInt(seatRangeMatch2[1])) + 1;
   else if (ticketsCountMatch) qty = parseInt(ticketsCountMatch[1]);
   if (isNaN(qty) || qty < 1) qty = 1;
   if (qty > 100) qty = 100;
@@ -507,9 +509,9 @@ export function parseEmail(raw, site) {
     if (secMatch) section = secMatch[1].trim();
     const rowMatch = text.match(/\bRow\s+([\w\d]{1,4})\b/i);
     if (rowMatch) row = rowMatch[1].trim();
-    if (seatRangeMatch) {
-      const lo = Math.min(parseInt(seatRangeMatch[1]), parseInt(seatRangeMatch[2]));
-      const hi = Math.max(parseInt(seatRangeMatch[1]), parseInt(seatRangeMatch[2]));
+    if (seatRangeMatch2) {
+      const lo = Math.min(parseInt(seatRangeMatch2[1]), parseInt(seatRangeMatch2[2]));
+      const hi = Math.max(parseInt(seatRangeMatch2[1]), parseInt(seatRangeMatch2[2]));
       seats = Array.from({ length: hi - lo + 1 }, (_, i) => String(lo + i)).join(', ');
     } else {
       const seatListMatch = text.match(/Seat[s]?\s*([\d]+(?:\s*,\s*[\d]+)+)/i);

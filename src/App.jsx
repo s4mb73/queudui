@@ -116,7 +116,7 @@ export default function App() {
       qtySold,
       salePrice,
       salePriceEach,
-      saleStatus:      "Pending",
+      saleStatus:      "Sold",
       ticketIds:       ids,
       section:         firstTicket.section || "",
       row:             firstTicket.row || "",

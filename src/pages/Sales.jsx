@@ -29,14 +29,143 @@ const COL = {
   revenue:  90,
   cost:     90,
   profit:   100,
-  status:   80,
+  status:   90,
   chevron:  16,
 };
 
 const ROW = { display: "flex", alignItems: "center", gap: 12, padding: "0 18px" };
 
+// ── Sale detail panel ─────────────────────────────────────────────────────────
+function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale, onClose }) {
+  const matchedTickets = (sale.ticketIds || [])
+    .map(id => tickets.find(t => t.id === id))
+    .filter(Boolean);
+
+  const firstTicket = matchedTickets[0];
+  const ev = eventMap[sale.eventId] || {};
+
+  const costTotal       = matchedTickets.reduce((a, t) => a + (t.cost || 0), 0);
+  const costPerTicket   = matchedTickets.length > 0 ? costTotal / matchedTickets.length : 0;
+  const profit          = (sale.salePrice || 0) - costTotal;
+  const profitPerTicket = sale.qtySold > 0 ? profit / sale.qtySold : 0;
+
+  const [email, setEmail] = useState(sale.customerEmail || "");
+  const [phone, setPhone] = useState(sale.customerPhone || "");
+
+  const saveField = (field, value) => {
+    if (updateSale) updateSale(sale.id, { [field]: value });
+  };
+
+  const inputStyle = {
+    fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: FONT,
+    textAlign: "right", border: "none", background: "transparent",
+    outline: "none", width: "100%", padding: "2px 0",
+    borderBottom: "1.5px solid transparent", transition: "border-color 0.15s",
+  };
+
+  const Row = ({ label, value, accent }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "0.5px solid #f0f0f3" }}>
+      <span style={{ fontSize: 12, color: "#6b7280", fontFamily: FONT, minWidth: 160 }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: accent || "#111827", fontFamily: FONT, textAlign: "right" }}>{value || "—"}</span>
+    </div>
+  );
+
+  const st = SALE_STATUS_STYLES[sale.saleStatus] || SALE_STATUS_STYLES.Sold;
+
+  return (
+    <div style={{ background: "#f7f8fa", borderTop: "1px solid #e2e6ea", padding: "16px 24px 20px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }}>
+
+        {/* ── Ticket / Purchase info ── */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#9ca3af", marginBottom: 10, fontFamily: FONT }}>Purchase Details</div>
+          <Row label="Buying Platform"    value={firstTicket?.buyingPlatform || "Ticketmaster"} />
+          <Row label="Event"              value={ev.name || firstTicket?.event} />
+          <Row label="Venue"              value={ev.venue || firstTicket?.venue} />
+          <Row label="Date of Event"      value={ev.date  || firstTicket?.date} />
+          <Row label="Section"            value={firstTicket?.section} />
+          <Row label="Row"                value={firstTicket?.row} />
+          <Row label="Seats"              value={matchedTickets.map(t => t.seats).filter(Boolean).join(", ")} />
+          <Row label="Quantity"           value={String(sale.qtySold)} />
+          <Row label="Account Email"      value={firstTicket?.accountEmail} />
+          <Row label="Order Reference"    value={firstTicket?.orderRef} />
+          <Row label="Restrictions"       value={firstTicket?.restrictions} />
+          <Row label="Is Standing"        value={firstTicket?.isStanding ? "Yes" : "No"} />
+        </div>
+
+        {/* ── Financial info ── */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#9ca3af", marginBottom: 10, fontFamily: FONT }}>Financials</div>
+          <Row label="Cost"                  value={costTotal > 0 ? fmt(costTotal) : "—"} />
+          <Row label="Cost Per Ticket"       value={costPerTicket > 0 ? fmt(costPerTicket) : "—"} />
+          <Row label="Sold Price"            value={fmt(sale.salePrice)} />
+          <Row label="Sold Price Per Ticket" value={fmt(sale.salePriceEach || (sale.salePrice / sale.qtySold))} />
+          <Row label="Profit"                value={costTotal > 0 ? `${profit >= 0 ? "+" : ""}${fmt(profit)}` : "—"} accent={costTotal > 0 ? (profit >= 0 ? "#059669" : "#ef4444") : undefined} />
+          <Row label="Profit Per Ticket"     value={costTotal > 0 ? `${profitPerTicket >= 0 ? "+" : ""}${fmt(profitPerTicket)}` : "—"} accent={costTotal > 0 ? (profitPerTicket >= 0 ? "#059669" : "#ef4444") : undefined} />
+          <Row label="Selling Platform"      value={sale.sellingPlatform} />
+          <Row label="Sale Order Number"     value={sale.orderId} />
+        </div>
+
+        {/* ── Delivery / Customer info ── */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#9ca3af", marginBottom: 10, fontFamily: FONT }}>Delivery & Status</div>
+
+          {/* Editable customer email */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "0.5px solid #f0f0f3", gap: 12 }}>
+            <span style={{ fontSize: 12, color: "#6b7280", fontFamily: FONT, minWidth: 160, flexShrink: 0 }}>Customer Email</span>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              onBlur={e => saveField("customerEmail", e.target.value)}
+              placeholder="Enter Customer Email"
+              style={inputStyle}
+              onFocus={e => { e.currentTarget.style.borderBottomColor = "#1a3a6e"; }}
+            />
+          </div>
+
+          {/* Editable customer phone */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "0.5px solid #f0f0f3", gap: 12 }}>
+            <span style={{ fontSize: 12, color: "#6b7280", fontFamily: FONT, minWidth: 160, flexShrink: 0 }}>Customer Phone</span>
+            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+              onBlur={e => saveField("customerPhone", e.target.value)}
+              placeholder="Enter Customer Phone Number"
+              style={inputStyle}
+              onFocus={e => { e.currentTarget.style.borderBottomColor = "#1a3a6e"; }}
+            />
+          </div>
+
+          {/* Status selector */}
+          <div style={{ padding: "8px 0", borderBottom: "0.5px solid #f0f0f3", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "#6b7280", fontFamily: FONT, minWidth: 160 }}>Status</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              {SALE_STATUSES.map(s => {
+                const sStyle = SALE_STATUS_STYLES[s];
+                const active = (sale.saleStatus || "Sold") === s;
+                return (
+                  <button key={s} onClick={() => updateSaleStatus(sale.id, s)}
+                    style={{ padding: "4px 12px", borderRadius: 20, border: `1px solid ${active ? sStyle.dot : "#e2e6ea"}`, background: active ? sStyle.bg : "transparent", color: active ? sStyle.text : "#6b7280", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}>
+                    {active && <div style={{ width: 5, height: 5, borderRadius: "50%", background: sStyle.dot }} />}
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Notes */}
+          {sale.notes && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4, fontFamily: FONT }}>Notes</div>
+              <div style={{ fontSize: 12, color: "#374151", fontFamily: FONT }}>{sale.notes}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Sales({ tickets, sales, setSales, updateSale, linkTicketsToSale, events, setShowAddSale, notify }) {
   const [expandedEvents, setExpandedEvents]   = useState({});
+  const [expandedSales, setExpandedSales]     = useState({});
   const [filterStatus, setFilterStatus]       = useState("All");
   const [filterPlatform, setFilterPlatform]   = useState("All");
   const [searchQ, setSearchQ]                 = useState("");
@@ -45,28 +174,18 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
   const [matchingSale, setMatchingSale]       = useState(null);
   const notifyFiredRef = useRef(false);
 
-  // Build event lookup
   const eventMap = useMemo(() => {
     const m = {};
     (events || []).forEach(e => { m[e.id] = e; });
     return m;
   }, [events]);
 
-  // Helper — get event name for a sale
-  function saleEventName(s) {
-    return eventMap[s.eventId]?.name || s.eventName || "Unknown Event";
-  }
-  function saleCategory(s) {
-    return eventMap[s.eventId]?.category || "Concert";
-  }
-  function saleVenue(s) {
-    return eventMap[s.eventId]?.venue || "";
-  }
+  function saleEventName(s) { return eventMap[s.eventId]?.name || s.eventName || "Unknown Event"; }
+  function saleCategory(s)  { return eventMap[s.eventId]?.category || "Concert"; }
+  function saleVenue(s)     { return eventMap[s.eventId]?.venue || ""; }
 
-  // ── Unmatched sales ───────────────────────────────────────────────────────
   const unmatchedSales = useMemo(() =>
-    sales.filter(s => !s.ticketIds || s.ticketIds.length === 0),
-    [sales]
+    sales.filter(s => !s.ticketIds || s.ticketIds.length === 0), [sales]
   );
 
   useEffect(() => {
@@ -77,21 +196,16 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
     }
   }, [unmatchedSales.length]);
 
-  // ── Match handlers ────────────────────────────────────────────────────────
   const handleLink = async (saleId, ticketIds) => {
     setMatchingSale(null);
-    if (linkTicketsToSale) {
-      await linkTicketsToSale(saleId, ticketIds);
-    } else {
-      setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds } : s));
-    }
+    if (linkTicketsToSale) await linkTicketsToSale(saleId, ticketIds);
+    else setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds } : s));
     notify?.(`✅ Sale linked to ${ticketIds.length} ticket${ticketIds.length !== 1 ? "s" : ""}`);
   };
 
   const handleCreateAndLink = (saleId, newTicket) => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined")
       window.dispatchEvent(new CustomEvent("queud:createAndLink", { detail: { saleId, newTicket } }));
-    }
     notify?.("✅ Ticket created and linked");
   };
 
@@ -108,7 +222,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
   // ── Event groups ──────────────────────────────────────────────────────────
   const eventGroups = useMemo(() => {
     const filtered = sales.filter(s => {
-      if (filterStatus !== "All" && (s.saleStatus || "Pending") !== filterStatus) return false;
+      if (filterStatus !== "All" && (s.saleStatus || "Sold") !== filterStatus) return false;
       if (filterPlatform !== "All" && s.sellingPlatform !== filterPlatform) return false;
       if (searchQ) {
         const q = searchQ.toLowerCase();
@@ -123,21 +237,16 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
 
     const groups = {};
     filtered.forEach(s => {
-      const evName  = saleEventName(s);
-      const evDate  = eventMap[s.eventId]?.date || s.date || "";
-      const key     = (s.eventId || evName) + "||" + evDate;
-
+      const evName = saleEventName(s);
+      const evDate = eventMap[s.eventId]?.date || s.date || "";
+      const key    = (s.eventId || evName) + "||" + evDate;
       if (!groups[key]) groups[key] = {
-        eventId:   s.eventId || "",
-        eventName: evName,
-        category:  saleCategory(s),
-        venue:     saleVenue(s),
-        date:      evDate,
-        sales: [], revenue: 0, cost: 0,
+        eventId: s.eventId || "", eventName: evName,
+        category: saleCategory(s), venue: saleVenue(s),
+        date: evDate, sales: [], revenue: 0, cost: 0,
       };
       groups[key].sales.push(s);
       groups[key].revenue += s.salePrice || 0;
-
       const linked = (s.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
       groups[key].cost += linked.reduce((a, t) => a + (t.cost || 0), 0);
     });
@@ -147,7 +256,6 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
 
   const allPlatforms = [...new Set(sales.map(s => s.sellingPlatform).filter(Boolean))];
 
-  // ── Actions ───────────────────────────────────────────────────────────────
   const updateSaleStatus = (saleId, v) => {
     if (updateSale) updateSale(saleId, { saleStatus: v });
     else setSales(prev => prev.map(s => s.id === saleId ? { ...s, saleStatus: v } : s));
@@ -164,12 +272,17 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
 
   const toggleSelect    = (id, e) => { e.stopPropagation(); setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
   const toggleSelectAll = () => { const all = sales.map(s => s.id); setSelected(selected.size === all.length ? new Set() : new Set(all)); };
-  const massDelete      = () => {
+  const massDelete = () => {
     if (!selected.size) return;
     if (!window.confirm(`Delete ${selected.size} sale${selected.size !== 1 ? "s" : ""}?`)) return;
     setSales(prev => prev.filter(s => !selected.has(s.id)));
     notify?.(`Deleted ${selected.size} sales`);
     setSelected(new Set());
+  };
+
+  const toggleSaleExpanded = (saleId, e) => {
+    e.stopPropagation();
+    setExpandedSales(prev => ({ ...prev, [saleId]: !prev[saleId] }));
   };
 
   const kpis = [
@@ -182,7 +295,6 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
 
   return (
     <div className="fade-up">
-
       <PageHeader
         title="Sales"
         sub={`${eventGroups.length} event${eventGroups.length !== 1 ? "s" : ""} · ${totalQty} ticket${totalQty !== 1 ? "s" : ""} sold`}
@@ -215,36 +327,25 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
               No inventory tickets linked — cost and profit will be inaccurate until matched.
             </span>
           </div>
-          <button
-            onClick={() => {
-              const allKeys = {};
-              sales.forEach(s => { const k = (s.eventId || saleEventName(s)) + (eventMap[s.eventId]?.date || s.date || ""); allKeys[k] = true; });
-              setExpandedEvents(allKeys);
-            }}
-            style={{ fontSize: 11, fontWeight: 600, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: FONT }}
-          >Expand All</button>
-          <button
-            onClick={() => setBannerDismissed(true)}
-            style={{ background: "transparent", border: "none", color: "#a16207", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 4 }}
-          >✕</button>
+          <button onClick={() => { const k = {}; sales.forEach(s => { k[(s.eventId || saleEventName(s)) + (eventMap[s.eventId]?.date || s.date || "")] = true; }); setExpandedEvents(k); }}
+            style={{ fontSize: 11, fontWeight: 600, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: FONT }}>
+            Expand All
+          </button>
+          <button onClick={() => setBannerDismissed(true)}
+            style={{ background: "transparent", border: "none", color: "#a16207", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 4 }}>✕</button>
         </div>
       )}
 
       {/* Filter bar */}
       <FilterBar>
         <SearchInput value={searchQ} onChange={setSearchQ} placeholder="Search events, platforms, sections…" />
-        <div
-          onClick={toggleSelectAll}
-          style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "4px 10px", borderRadius: 20, border: `1px solid ${selected.size > 0 ? "rgba(26,58,110,0.3)" : "#e8e8ec"}`, background: selected.size > 0 ? "rgba(26,58,110,0.06)" : "transparent" }}
-        >
+        <div onClick={toggleSelectAll} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "4px 10px", borderRadius: 20, border: `1px solid ${selected.size > 0 ? "rgba(26,58,110,0.3)" : "#e8e8ec"}`, background: selected.size > 0 ? "rgba(26,58,110,0.06)" : "transparent" }}>
           <Checkbox checked={selected.size === sales.length && sales.length > 0} indeterminate={selected.size > 0 && selected.size < sales.length} size={12} />
           <span style={{ fontSize: 11, color: selected.size > 0 ? "#1a3a6e" : "#6b7280", fontWeight: 600, fontFamily: FONT }}>
             {selected.size > 0 ? `${selected.size} selected` : "Select all"}
           </span>
         </div>
-
         <FilterDivider />
-
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {["All", ...SALE_STATUSES].map(s => {
             const st = s !== "All" ? SALE_STATUS_STYLES[s] : null;
@@ -256,7 +357,6 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
             );
           })}
         </div>
-
         {allPlatforms.length > 0 && (
           <>
             <FilterDivider />
@@ -307,16 +407,16 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
             <button className="ghost-btn" style={{ marginTop: 12 }} onClick={() => { setSearchQ(""); setFilterStatus("All"); setFilterPlatform("All"); }}>Clear filters</button>
           </div>
         ) : eventGroups.map((group, gi) => {
-          const eKey        = (group.eventId || group.eventName) + group.date;
-          const isExpanded  = expandedEvents[eKey];
-          const groupProfit = group.revenue - group.cost;
-          const groupROI    = group.cost > 0 ? (groupProfit / group.cost) * 100 : 0;
-          const qtySold     = group.sales.reduce((a, s) => a + s.qtySold, 0);
-          const accent      = categoryAccent(group.category);
-          const platforms   = [...new Set(group.sales.map(s => s.sellingPlatform).filter(Boolean))];
-          const groupIds    = group.sales.map(s => s.id);
-          const allGroupSel = groupIds.every(id => selected.has(id));
-          const someGroupSel= groupIds.some(id => selected.has(id));
+          const eKey         = (group.eventId || group.eventName) + group.date;
+          const isExpanded   = expandedEvents[eKey];
+          const groupProfit  = group.revenue - group.cost;
+          const groupROI     = group.cost > 0 ? (groupProfit / group.cost) * 100 : 0;
+          const qtySold      = group.sales.reduce((a, s) => a + s.qtySold, 0);
+          const accent       = categoryAccent(group.category);
+          const platforms    = [...new Set(group.sales.map(s => s.sellingPlatform).filter(Boolean))];
+          const groupIds     = group.sales.map(s => s.id);
+          const allGroupSel  = groupIds.every(id => selected.has(id));
+          const someGroupSel = groupIds.some(id => selected.has(id));
 
           const toggleGroup = e => {
             e.stopPropagation();
@@ -338,16 +438,13 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
                 onMouseEnter={e => { if (!someGroupSel) e.currentTarget.style.background = "#fafafa"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = someGroupSel ? "#fffbf7" : "white"; }}
               >
-                <div onClick={toggleGroup}
-                  style={{ width: COL.checkbox, height: COL.checkbox, borderRadius: 4, border: `1.5px solid ${allGroupSel ? "#1a3a6e" : someGroupSel ? "#1a3a6e" : "#d1d5db"}`, background: allGroupSel ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
+                <div onClick={toggleGroup} style={{ width: COL.checkbox, height: COL.checkbox, borderRadius: 4, border: `1.5px solid ${allGroupSel ? "#1a3a6e" : someGroupSel ? "#1a3a6e" : "#d1d5db"}`, background: allGroupSel ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
                   {allGroupSel  && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
                   {!allGroupSel && someGroupSel && <span style={{ color: "#1a3a6e", fontSize: 9 }}>—</span>}
                 </div>
-
                 <div style={{ width: COL.icon, height: COL.icon, borderRadius: 8, background: group.category === "Sport" ? "rgba(26,58,110,0.08)" : "rgba(124,58,237,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
                   {group.category === "Sport" ? "⚽" : "🎵"}
                 </div>
-
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: FONT }}>{group.eventName}</div>
                   <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2, fontFamily: FONT, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -356,7 +453,6 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
                     {platforms.map(p => <PlatformBadge key={p} platform={p} />)}
                   </div>
                 </div>
-
                 <div style={{ width: COL.date,     flexShrink: 0, fontSize: 12, color: "#6b7280", fontFamily: FONT }}>{group.date || "—"}</div>
                 <div style={{ width: COL.platform, flexShrink: 0 }} />
                 <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{qtySold}×</div>
@@ -366,102 +462,103 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
                   <div style={{ fontSize: 13, fontWeight: 700, color: groupProfit >= 0 ? "#059669" : "#ef4444", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{groupProfit >= 0 ? "+" : ""}{fmt(groupProfit)}</div>
                   <div style={{ fontSize: 10, color: groupROI >= 0 ? "#059669" : "#ef4444", marginTop: 1, fontFamily: FONT }}>{fmtPct(groupROI)} ROI</div>
                 </div>
-                <div style={{ width: COL.status,  flexShrink: 0 }} />
+                <div style={{ width: COL.status, flexShrink: 0 }} />
                 <div style={{ width: COL.chevron, flexShrink: 0, fontSize: 12, color: "#9ca3af", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</div>
               </div>
 
               {/* Individual sale rows */}
               {isExpanded && group.sales.map((s, si) => {
-                const matchedTickets = (s.ticketIds || [])
-                  .map(id => tickets.find(t => t.id === id))
-                  .filter(Boolean);
-
-                const isUnmatched = !s.ticketIds || s.ticketIds.length === 0;
-                const costTotal   = matchedTickets.reduce((a, t) => a + (t.cost || 0), 0);
-                const sProfit     = (s.salePrice || 0) - costTotal;
-                const isSelected  = selected.has(s.id);
+                const matchedTickets = (s.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
+                const isUnmatched    = !s.ticketIds || s.ticketIds.length === 0;
+                const costTotal      = matchedTickets.reduce((a, t) => a + (t.cost || 0), 0);
+                const sProfit        = (s.salePrice || 0) - costTotal;
+                const isSelected     = selected.has(s.id);
+                const isSaleExpanded = expandedSales[s.id];
+                const st             = SALE_STATUS_STYLES[s.saleStatus] || SALE_STATUS_STYLES.Sold;
 
                 return (
-                  <div key={s.id}
-                    style={{ ...ROW, padding: "9px 18px", borderTop: "0.5px solid #f0f0f3", background: isSelected ? "rgba(26,58,110,0.03)" : "#f9f9fb", transition: "background 0.1s" }}
-                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#f4f4f6"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(26,58,110,0.03)" : "#f9f9fb"; }}
-                  >
-                    <div onClick={e => toggleSelect(s.id, e)}
-                      style={{ width: COL.checkbox, height: COL.checkbox, borderRadius: 3, border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d5db"}`, background: isSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
-                      {isSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
-                    </div>
+                  <div key={s.id}>
+                    {/* Sale summary row */}
+                    <div
+                      style={{ ...ROW, padding: "9px 18px", borderTop: "0.5px solid #f0f0f3", background: isSelected ? "rgba(26,58,110,0.03)" : isSaleExpanded ? "#f4f6fb" : "#f9f9fb", transition: "background 0.1s", cursor: "pointer" }}
+                      onClick={e => toggleSaleExpanded(s.id, e)}
+                      onMouseEnter={e => { if (!isSelected && !isSaleExpanded) e.currentTarget.style.background = "#f4f4f6"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(26,58,110,0.03)" : isSaleExpanded ? "#f4f6fb" : "#f9f9fb"; }}
+                    >
+                      <div onClick={e => toggleSelect(s.id, e)} style={{ width: COL.checkbox, height: COL.checkbox, borderRadius: 3, border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d5db"}`, background: isSelected ? "#1a3a6e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
+                        {isSelected && <span style={{ color: "white", fontSize: 8, fontWeight: 700 }}>✓</span>}
+                      </div>
 
-                    <div style={{ width: COL.icon, flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                      <div style={{ width: 2, height: 22, background: "#e2e6ea", borderRadius: 2 }} />
-                    </div>
+                      <div style={{ width: COL.icon, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                        <div style={{ width: 2, height: 22, background: "#e2e6ea", borderRadius: 2 }} />
+                      </div>
 
-                    {/* Sale info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                        {s.section && (
-                          <span style={{ background: "#eef2ff", color: "#1a3a6e", border: "1px solid #c7d2fe", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                            {/standing|general admission|ga\b/i.test(s.section) ? s.section : `Sec ${s.section}`}
-                          </span>
-                        )}
-                        {s.row && (
-                          <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>Row {s.row}</span>
-                        )}
-                        {s.seats && (
-                          <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.seats}</span>
-                        )}
-                        {!s.section && !s.row && !s.seats && (
-                          <span style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.qtySold}× tickets</span>
-                        )}
-                        {s.orderId && (
-                          <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "monospace" }}>Order {s.orderId}</span>
-                        )}
-                        {isUnmatched && (
-                          <button
-                            onClick={e => { e.stopPropagation(); setMatchingSale(s); }}
-                            style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, color: "#92400e", cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap", flexShrink: 0 }}
-                          >⚠ Unmatched</button>
+                      {/* Seat chips */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                          {s.section && (
+                            <span style={{ background: "#eef2ff", color: "#1a3a6e", border: "1px solid #c7d2fe", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                              {/standing|general admission|ga\b/i.test(s.section) ? s.section : `Sec ${s.section}`}
+                            </span>
+                          )}
+                          {s.row && <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>Row {s.row}</span>}
+                          {s.seats && <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.seats}</span>}
+                          {!s.section && !s.row && !s.seats && (
+                            <span style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.qtySold}× tickets</span>
+                          )}
+                          {s.orderId && <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "monospace" }}>Order {s.orderId}</span>}
+                          {isUnmatched && (
+                            <button onClick={e => { e.stopPropagation(); setMatchingSale(s); }}
+                              style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, color: "#92400e", cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap", flexShrink: 0 }}>
+                              ⚠ Unmatched
+                            </button>
+                          )}
+                        </div>
+                        {(s.customerEmail || s.customerPhone) && (
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3, display: "flex", gap: 8 }}>
+                            {s.customerEmail && <span>✉ {s.customerEmail}</span>}
+                            {s.customerPhone && <span>📱 {s.customerPhone}</span>}
+                          </div>
                         )}
                       </div>
-                      {/* Customer info — shown when present */}
-                      {(s.customerEmail || s.customerPhone) && (
-                        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3, display: "flex", gap: 8 }}>
-                          {s.customerEmail && <span>✉ {s.customerEmail}</span>}
-                          {s.customerPhone && <span>📱 {s.customerPhone}</span>}
+
+                      <div style={{ width: COL.date,     flexShrink: 0, fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{s.date || "—"}</div>
+                      <div style={{ width: COL.platform, flexShrink: 0 }}><PlatformBadge platform={s.sellingPlatform} /></div>
+                      <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{s.qtySold}×</div>
+                      <div style={{ width: COL.revenue,  flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{fmt(s.salePrice)}</div>
+                      <div style={{ width: COL.cost,     flexShrink: 0, fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{costTotal > 0 ? fmt(costTotal) : "—"}</div>
+                      <div style={{ width: COL.profit,   flexShrink: 0, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: FONT, color: isUnmatched ? "#d97706" : sProfit >= 0 ? "#059669" : "#ef4444", textAlign: "right" }}>
+                        {isUnmatched ? "?" : `${sProfit >= 0 ? "+" : ""}${fmt(sProfit)}`}
+                      </div>
+
+                      {/* Status pill */}
+                      <div style={{ width: COL.status, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: st.bg, color: st.text, borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 600, fontFamily: FONT }}>
+                          <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />
+                          {s.saleStatus || "Sold"}
                         </div>
-                      )}
+                      </div>
+
+                      {/* Expand chevron / delete */}
+                      <div style={{ width: COL.chevron, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }} onClick={e => e.stopPropagation()}>
+                        <button onClick={e => deleteSale(s.id, e)}
+                          style={{ background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer", padding: "2px", borderRadius: 5, fontSize: 13, lineHeight: 1, transition: "all 0.15s" }}
+                          onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = "#d1d5db"; }}>✕</button>
+                      </div>
                     </div>
 
-                    <div style={{ width: COL.date,     flexShrink: 0, fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{s.date || "—"}</div>
-                    <div style={{ width: COL.platform, flexShrink: 0 }}><PlatformBadge platform={s.sellingPlatform} /></div>
-                    <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{s.qtySold}×</div>
-                    <div style={{ width: COL.revenue,  flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{fmt(s.salePrice)}</div>
-                    <div style={{ width: COL.cost,     flexShrink: 0, fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{costTotal > 0 ? fmt(costTotal) : "—"}</div>
-                    <div style={{ width: COL.profit,   flexShrink: 0, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: FONT, color: isUnmatched ? "#d97706" : sProfit >= 0 ? "#059669" : "#ef4444", textAlign: "right" }}>
-                      {isUnmatched ? "?" : `${sProfit >= 0 ? "+" : ""}${fmt(sProfit)}`}
-                    </div>
-
-                    {/* Status — clickable */}
-                    <div style={{ width: COL.status, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                      {(() => {
-                        const st = SALE_STATUS_STYLES[s.saleStatus] || SALE_STATUS_STYLES.Pending;
-                        return (
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: st.bg, color: st.text, borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 600, fontFamily: FONT }}>
-                            <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />
-                            {s.saleStatus || "Pending"}
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    <div style={{ width: COL.chevron, flexShrink: 0 }}>
-                      <button
-                        onClick={e => deleteSale(s.id, e)}
-                        style={{ background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer", padding: "2px", borderRadius: 5, fontSize: 13, lineHeight: 1, transition: "all 0.15s" }}
-                        onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; }}
-                        onMouseLeave={e => { e.currentTarget.style.color = "#d1d5db"; }}
-                      >✕</button>
-                    </div>
+                    {/* Expandable detail panel */}
+                    {isSaleExpanded && (
+                      <SaleDetailPanel
+                        sale={s}
+                        tickets={tickets}
+                        eventMap={eventMap}
+                        updateSaleStatus={updateSaleStatus}
+                        updateSale={updateSale}
+                        onClose={() => setExpandedSales(prev => ({ ...prev, [s.id]: false }))}
+                      />
+                    )}
                   </div>
                 );
               })}
