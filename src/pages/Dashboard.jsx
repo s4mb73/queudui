@@ -27,14 +27,10 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
 
   // ── KPI calculations ───────────────────────────────────────────────────────
   const totalInvested = tickets.reduce((a, t) => a + (t.cost || 0), 0);
-
-  const totalRevenue = sales.reduce((a, s) => a + (parseFloat(s.salePrice) || 0), 0);
-
+  const totalRevenue  = sales.reduce((a, s) => a + (parseFloat(s.salePrice) || 0), 0);
   const totalCostSold = sales.reduce((a, s) => a + getSaleCost(s), 0);
-
-  const totalProfit = totalRevenue - totalCostSold;
-
-  const roi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+  const totalProfit   = totalRevenue - totalCostSold;
+  const roi           = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
 
   const stockCount = tickets.reduce((a, t) => {
     if (['Sold','Delivered'].includes(t.status)) return a;
@@ -45,13 +41,13 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
 
   // ── Top events by profit ───────────────────────────────────────────────────
   const salesByEvent = sales.reduce((acc, s) => {
-    const name = getSaleEventName(s);
+    const name   = getSaleEventName(s);
     const profit = (parseFloat(s.salePrice) || 0) - getSaleCost(s);
     acc[name] = (acc[name] || 0) + profit;
     return acc;
   }, {});
   const topEvents = Object.entries(salesByEvent).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const maxBar = Math.max(...topEvents.map(e => Math.abs(e[1])), 1);
+  const maxBar    = Math.max(...topEvents.map(e => Math.abs(e[1])), 1);
 
   // ── Current stock groups ───────────────────────────────────────────────────
   const stockGroups = {};
@@ -62,7 +58,7 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
       category: t.category, totalAvail: 0, totalQty: 0,
     };
     stockGroups[key].totalAvail += (t.qtyAvailable ?? t.qty ?? 1);
-    stockGroups[key].totalQty += (t.qty ?? 1);
+    stockGroups[key].totalQty  += (t.qty ?? 1);
   });
 
   const kpis = [
@@ -75,6 +71,16 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
   ];
 
   const card = { background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" };
+
+  const fmtD = (d) => {
+    if (!d) return "";
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      return parseInt(m[3]) + " " + months[parseInt(m[2])-1] + " " + m[1];
+    }
+    return d;
+  };
 
   return (
     <div className="fade-up">
@@ -123,8 +129,8 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
         <div style={{ ...card, overflow: "hidden" }}>
           <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", letterSpacing: "-0.2px" }}>Recent Sales</div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Latest transactions</div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", letterSpacing: "-0.2px" }}>Completed Sales</div>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>All matched transactions</div>
             </div>
             {sales.length > 0 && <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setView("sales")}>View all</button>}
           </div>
@@ -133,7 +139,7 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
               <div style={{ textAlign: "center", padding: "32px 0", color: "#94a3b8", fontSize: 13 }}>No sales recorded yet</div>
             ) : sales.slice().reverse().slice(0, 7).map(s => {
               const eventName = getSaleEventName(s);
-              const profit = (parseFloat(s.salePrice) || 0) - getSaleCost(s);
+              const profit    = (parseFloat(s.salePrice) || 0) - getSaleCost(s);
               return (
                 <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px", borderBottom: "0.5px solid #f1f4f8" }}>
                   <div style={{ minWidth: 0 }}>
@@ -153,7 +159,7 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
         </div>
       </div>
 
-      {/* Current Stock */}
+      {/* Current Stock — cards are clickable, navigate to Inventory */}
       <div style={{ ...card, overflow: "hidden" }}>
         <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #e2e6ea", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
@@ -168,14 +174,22 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
             {Object.entries(stockGroups).slice(0, 9).map(([key, group]) => {
               const venueClean = (group.venue || "").replace(/\s*[—–-]\s*.+$/, "").replace(/,.*$/, "").trim();
-              const fmtD = (d) => {
-                if (!d) return "";
-                const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-                if (m) { const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return parseInt(m[3]) + " " + months[parseInt(m[2])-1] + " " + m[1]; }
-                return d;
-              };
               return (
-                <div key={key} style={{ padding: "13px 18px", borderRight: "0.5px solid #f1f4f8", borderBottom: "0.5px solid #f1f4f8", display: "flex", alignItems: "center", gap: 12, borderLeft: `3px solid ${group.category === "Sport" ? "#1a3a6e" : "#7c3aed"}` }}>
+                <div
+                  key={key}
+                  onClick={() => setView("inventory")}
+                  style={{
+                    padding: "13px 18px",
+                    borderRight: "0.5px solid #f1f4f8",
+                    borderBottom: "0.5px solid #f1f4f8",
+                    display: "flex", alignItems: "center", gap: 12,
+                    borderLeft: `3px solid ${group.category === "Sport" ? "#1a3a6e" : "#7c3aed"}`,
+                    cursor: "pointer",
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#f7f8fa"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
                   <div style={{ width: 36, height: 36, borderRadius: 9, background: group.category === "Sport" ? "rgba(26,58,110,0.08)" : "rgba(124,58,237,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
                     {group.category === "Sport" ? "⚽" : "🎵"}
                   </div>

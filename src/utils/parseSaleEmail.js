@@ -8,24 +8,35 @@ function stripHtmlBasic(html) {
 
 export function parseViagogoSaleEmail(raw) {
   const text = stripHtmlBasic(stripQP(raw));
-  const orderIdM = text.match(/Order\s*ID[:\s]+(\d{6,12})/i);
-  const eventM = text.match(/Event[:\s]+([^\n|]+?)(?:\s*Venue:|$)/i);
-  const venueM = text.match(/Venue[:\s]+([^\n|]+?)(?:\s*Date:|$)/i);
-  const dateM = text.match(/Date[:\s]+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d{1,2},\s+\d{4}[^|]*)/i);
-  const ticketsM = text.match(/Ticket\(s\)[:\s]+([^\n]+)/i);
+  const orderIdM = text.match(/Order\s*ID[:\s]+(\d{6,12})/i)
+    || text.match(/Please send your tickets\s+(\d{6,12})/i);
+  const eventM = text.match(/Event[:\s]+([^\n|]+?)(?:\s*Listing Note|Venue:|$)/i)
+    || text.match(/Event[:\s]+([^\n|]{3,60})/i);
+  const venueM = text.match(/Venue[:\s]+([^\n|]+?)(?:\s*Date:|Must Ship|$)/i);
+  const dateM = text.match(/Date[:\s]+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d{1,2},\s+\d{4}[^|<\n]*)/i);
+  const ticketsM = text.match(/Ticket\(s\)[:\s]+([^\n<]+)/i);
   const priceM = text.match(/Price\s+per\s+Ticket[:\s]+£\s*([\d,]+\.?\d*)/i);
   const totalM = text.match(/Total\s+Proceeds[:\s]+£\s*([\d,]+\.?\d*)/i);
   const qtyM = text.match(/Number\s+of\s+Tickets[:\s]+(\d+)/i);
 
-  const qty = qtyM ? parseInt(qtyM[1]) : 1;
+  let qty = qtyM ? parseInt(qtyM[1]) : 1;
+
+  // Fallback: qty in brackets on tickets line e.g. "(1 Ticket(s))"
+  if (!qtyM && ticketsM) {
+    const inlineQtyM = ticketsM[1].match(/\((\d+)\s+Ticket/i);
+    if (inlineQtyM) qty = parseInt(inlineQtyM[1]);
+  }
+
   const priceEach = priceM ? parseFloat(priceM[1].replace(/,/g, '')) : (totalM ? parseFloat(totalM[1].replace(/,/g, '')) / qty : 0);
 
-  // Parse section/row/seats from tickets line e.g. "Section ARENA E, Row 15, Seat(s) 27 - 28"
+  // Parse section/row/seats from tickets line
+  // Old: "Section ARENA E, Row 15, Seat(s) 27 - 28"
+  // New: "Section 409, Row 1, (1 Ticket(s))"
   let section = '', row = '', seats = '';
   if (ticketsM) {
     const t = ticketsM[1];
     const secM = t.match(/Section\s+([^,]+)/i);
-    const rowM = t.match(/Row\s+(\d+)/i);
+    const rowM = t.match(/Row\s+([\w\d]+)/i);
     const seatM = t.match(/Seat\(?s?\)?\s+([\d\s\-–]+)/i);
     if (secM) section = secM[1].trim();
     if (rowM) row = rowM[1].trim();
@@ -42,7 +53,7 @@ export function parseViagogoSaleEmail(raw) {
   return {
     platform: 'Viagogo',
     orderId: orderIdM ? orderIdM[1] : '',
-    event: eventM ? eventM[1].trim().substring(0, 60) : '',
+    event: eventM ? eventM[1].trim().replace(/\s+/g, ' ').substring(0, 60) : '',
     venue: venueM ? venueM[1].trim().substring(0, 50) : '',
     date: dateM ? dateM[1].trim() : '',
     section, row, seats, qty,
@@ -82,7 +93,7 @@ export function parseTixstockSaleEmail(raw) {
 }
 
 export function detectSaleSite(raw) {
-  if (/viagogo\.com|automated@orders\.viagogo/i.test(raw)) return 'viagogo';
+  if (/viagogo\.com|automated@orders\.viagogo|Please send your tickets/i.test(raw)) return 'viagogo';
   if (/tixstock\.com|orders@tixstock/i.test(raw)) return 'tixstock';
   return null;
 }
