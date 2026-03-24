@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { fmt, today, uid } from "../../utils/format";
-import { parseEmail, parseLiverpoolEmail, parseTicketmasterEmail, detectSite, stripEmailForAI, isStandingTicket } from "../../utils/parseEmail";
+import { parseEmail, parseLiverpoolEmail, parseTicketmasterEmail, parseTicketmasterUSEmail, detectSite, stripEmailForAI, isStandingTicket } from "../../utils/parseEmail";
 import { parseViagogoSaleEmail, parseTixstockSaleEmail, detectSaleSite } from "../../utils/parseSaleEmail";
 import EmailAccounts    from "./EmailAccounts";
 import SalesPlatforms   from "./SalesPlatforms";
@@ -15,9 +15,10 @@ const SECRET  = import.meta.env.VITE_API_SECRET || "";
 const HEADERS = { "Content-Type": "application/json", "x-queud-secret": SECRET };
 
 const SITES = [
-  { value: "ticketmaster_uk", label: "Ticketmaster UK", subject: "You got the tickets" },
-  { value: "liverpool",       label: "Liverpool FC",    subject: "Liverpool FC Booking Confirmation" },
-  { value: "generic",         label: "Other / Generic", subject: "" },
+  { value: "ticketmaster_uk", label: "Ticketmaster UK",  subject: "You got the tickets" },
+  { value: "ticketmaster_us", label: "Ticketmaster USA", subject: "You Got Tickets To" },
+  { value: "liverpool",       label: "Liverpool FC",     subject: "Liverpool FC Booking Confirmation" },
+  { value: "generic",         label: "Other / Generic",  subject: "" },
 ];
 
 function SaleTicketPicker({ tickets, allTickets, parsedSale, onRecord, fmt }) {
@@ -274,6 +275,27 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
       return;
     }
 
+    if (site === "ticketmaster_us") {
+      selected.forEach(email => {
+        try {
+          const body = email.rawHtml || email.body || "";
+          parseTicketmasterUSEmail("Subject: " + email.subject + "\n" + body).forEach((r, i) => {
+            const id = email.uid + "_" + (r.seats || i);
+            resultMap.set(id, {
+              ...r,
+              accountEmail: extractEmail(email.to),
+              _subject: email.subject,
+              _uid: id,
+            });
+          });
+        } catch(e) { console.error("TM USA parse error", e); }
+      });
+      flushUI(selected.length);
+      setBulkParsing(false);
+      notify(`Parsed ${resultMap.size} tickets from ${selected.length} emails`);
+      return;
+    }
+
     const GENERIC_SYSTEM = "Extract ticket info. Return ONLY JSON: {event,date,time,venue,section,row,seats,qty,costPrice,orderRef,restrictions,isStanding}. costPrice=total paid in GBP including fees. isStanding=true for Standing/Pitch/Floor/GA.";
     const needsAI = [];
 
@@ -328,16 +350,37 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
     let skipped = 0;
     notify("Importing tickets…");
 
+    // Fetch USD→GBP rate once for the whole batch if any tickets are USD
+    let usdToGbp = null;
+    const hasUSD = bulkParsed.some(p => p.originalCurrency === "USD");
+    if (hasUSD) {
+      try {
+        const rateRes  = await fetch("https://open.er-api.com/v6/latest/USD");
+        const rateData = await rateRes.json();
+        usdToGbp = rateData?.rates?.GBP;
+      } catch(e) {
+        console.error("Rate fetch failed:", e);
+      }
+      if (!usdToGbp) {
+        notify("⚠ Couldn't fetch USD→GBP rate — cost will be £0, edit manually after import", "err");
+      } else {
+        notify(`USD→GBP rate: ${usdToGbp.toFixed(4)}`);
+      }
+    }
+
     const newTickets = [];
 
     for (const p of bulkParsed) {
       if (!p.event && !p._subject) continue;
 
       const eventName = (p.event || p._subject || "").substring(0, 60);
-      const cost      = parseFloat(p.costPrice) || 0;
+      const isUSD     = p.originalCurrency === "USD";
+      const rawCost   = parseFloat(p.costPrice) || 0;
+      const cost      = isUSD && usdToGbp
+        ? parseFloat((rawCost * usdToGbp).toFixed(2))
+        : rawCost;
       const standing  = p.isStanding || isStandingTicket(p.restrictions || "");
 
-      // Find or create event row in the events table
       let eventId = null;
       if (findOrCreateEvent && eventName) {
         eventId = await findOrCreateEvent({
@@ -350,26 +393,29 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
       }
 
       const base = {
-        event:          eventName,
-        eventId:        eventId || "",
-        buyingPlatform: "Ticketmaster",
-        date:           p.date || "",
-        time:           p.time || "",
-        venue:          p.venue || "",
-        orderRef:       p.orderRef || "",
-        notes:          "",
-        accountEmail:   p.accountEmail || "",
-        restrictions:   (p.restrictions || "").replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, "").trim(),
-        isStanding:     standing,
-        status:         "Unsold",
-        listedOn:       "",
-        addedAt:        new Date().toISOString(),
+        event:            eventName,
+        eventId:          eventId || "",
+        buyingPlatform:   p.buyingPlatform || "Ticketmaster",
+        date:             p.date || "",
+        time:             p.time || "",
+        venue:            p.venue || "",
+        orderRef:         p.orderRef || "",
+        notes:            "",
+        accountEmail:     p.accountEmail || "",
+        restrictions:     (p.restrictions || "").replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, "").trim(),
+        isStanding:       standing,
+        status:           "Unsold",
+        listedOn:         "",
+        addedAt:          new Date().toISOString(),
+        originalCurrency: p.originalCurrency || "GBP",
+        originalAmount:   p.originalAmount || rawCost,
+        exchangeRate:     isUSD && usdToGbp ? usdToGbp : 1,
       };
 
       if (standing) {
         const qty = parseInt(p.qty) || 1;
         newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: "", seats: "", qty, qtyAvailable: qty, cost, costPerTicket: parseFloat((cost / qty).toFixed(2)) });
-      } else if ((bulkSite === "liverpool" || bulkSite === "ticketmaster_uk") && p.seats !== undefined) {
+      } else if ((bulkSite === "liverpool" || bulkSite === "ticketmaster_uk" || bulkSite === "ticketmaster_us") && p.seats !== undefined) {
         newTickets.push({ ...base, id: Math.random().toString(36).slice(2, 10), section: p.section || "", row: p.row || "", seats: p.seats || "", qty: 1, qtyAvailable: 1, cost, costPerTicket: cost });
       } else {
         const seatsList   = parseSeats(p.seats);
@@ -406,6 +452,7 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
     const site = detectSite(emailText);
     if (site === "liverpool") { setParsed(parseLiverpoolEmail(emailText)[0]); return; }
     if (site === "ticketmaster_uk" && !settings.openAiKey) { setParsed(parseTicketmasterEmail(emailText)[0]); return; }
+    if (site === "ticketmaster_us") { setParsed(parseTicketmasterUSEmail(emailText)[0]); return; }
     if (!settings.openAiKey) { setParsed(parseEmail(emailText)); return; }
     setAiParsing(true); setParsed(null);
     try {

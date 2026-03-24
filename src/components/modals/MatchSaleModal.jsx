@@ -1,285 +1,321 @@
 // src/components/modals/MatchSaleModal.jsx
 import { useState, useMemo } from "react";
-import {
-  FONT, COLORS, CATEGORIES, BLANK_TICKET,
-  PLATFORM_COLORS, TICKET_STATUS_STYLES,
-} from "../../lib/schema";
+import { fmt } from "../../utils/format";
+import { FONT, PLATFORM_COLORS } from "../../lib/schema";
 
-const OVERLAY = {
-  position: "fixed", inset: 0,
-  background: "rgba(10,14,20,0.45)",
-  zIndex: 1000,
-  display: "flex", justifyContent: "flex-end",
-};
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-const PANEL = {
-  width: 480, maxWidth: "95vw",
-  height: "100vh",
-  background: "#fff",
-  boxShadow: "-4px 0 32px rgba(0,0,0,0.12)",
-  display: "flex", flexDirection: "column",
-  fontFamily: FONT,
-  animation: "slideInRight 0.2s ease",
-};
+function resolveEventName(sale, tickets) {
+  // 1. Try matched tickets (most reliable)
+  const linked = (sale.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
+  if (linked[0]?.event) return linked[0].event;
+  // 2. Fall back to sale fields
+  if (sale.eventName) return sale.eventName;
+  if (sale.notes)     return sale.notes;
+  return null; // no name known — will show event details instead
+}
+
+function scoreTicket(ticket, sale) {
+  // Returns a relevance score — higher = better match
+  let score = 0;
+  const saleSection = (sale.section || "").toLowerCase().trim();
+  const saleRow     = (sale.row     || "").toLowerCase().trim();
+  const saleSeats   = (sale.seats   || "").toLowerCase().trim();
+  const tSection    = (ticket.section || "").toLowerCase().trim();
+  const tRow        = (ticket.row     || "").toLowerCase().trim();
+  const tSeats      = (ticket.seats   || "").toLowerCase().trim();
+
+  if (saleSection && tSection && saleSection === tSection) score += 10;
+  if (saleRow     && tRow     && saleRow     === tRow)     score += 8;
+  if (saleSeats   && tSeats   && tSeats.includes(saleSeats)) score += 6;
+
+  // Platform match on buying side
+  const salePlatform = (sale.sellingPlatform || "").toLowerCase();
+  const tPlatform    = (ticket.buyingPlatform || "").toLowerCase();
+  if (salePlatform && tPlatform && tPlatform.includes(salePlatform)) score += 3;
+
+  return score;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink, onClose }) {
-  const [tab, setTab] = useState("link");
-  const [search, setSearch] = useState("");
-  const [selectedIds, setSelectedIds] = useState([]);
-
-  const [form, setForm] = useState({
-    ...BLANK_TICKET,
-    event:    sale?.eventName || "",
-    category: sale?.category  || "Sport",
-    date:     sale?.date      || "",
-    section:  sale?.section   || "",
-    row:      sale?.row       || "",
-    seats:    sale?.seats     || "",
-    qty:      sale?.qtySold   || 1,
-    qtyAvailable: 0,
-    status:   "Sold",
+  const [selected, setSelected]   = useState(new Set((sale.ticketIds || [])));
+  const [showNew, setShowNew]     = useState(false);
+  const [newTicket, setNewTicket] = useState({
+    event: "", date: "", venue: "", section: "", row: "", seats: "",
+    qty: sale.qtySold || 1, cost: "", buyingPlatform: "", orderRef: "",
   });
 
-  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Resolve event name — never "Unknown Event" if tickets have names
+  const eventName = resolveEventName(sale, tickets);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return tickets.filter(t => {
-      if (!q) return true;
-      return (
-        (t.event   || "").toLowerCase().includes(q) ||
-        (t.section || "").toLowerCase().includes(q) ||
-        (t.row     || "").toLowerCase().includes(q) ||
-        (t.orderRef|| "").toLowerCase().includes(q)
-      );
+  // Available tickets — those not already Sold/Delivered to *another* sale
+  const candidates = useMemo(() => {
+    return tickets
+      .filter(t => {
+        // Only show available tickets (Unsold or Listed)
+        if (!["Unsold", "Listed"].includes(t.status)) return false;
+        // Must have available qty
+        if ((t.qtyAvailable ?? t.qty ?? 1) < 1) return false;
+        return true;
+      })
+      .map(t => ({ ...t, _score: scoreTicket(t, sale) }))
+      .sort((a, b) => b._score - a._score);
+  }, [tickets, sale]);
+
+  const toggle = (id) => {
+    setSelected(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
     });
-  }, [tickets, search]);
-
-  const toggleTicket = (id) => {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
   };
 
-  const handleLink = () => {
-    if (!selectedIds.length) return;
-    onLink?.(sale.id, selectedIds);
+  const handleConfirm = () => {
+    if (selected.size === 0) return;
+    onLink(sale.id, [...selected]);
   };
 
-  const handleCreate = () => {
-    if (!form.event || !form.cost) return;
-    onCreateAndLink?.(sale.id, form);
-    onClose?.();
+  const handleCreateNew = () => {
+    if (!newTicket.event && !newTicket.section) return;
+    onCreateAndLink(sale.id, {
+      ...newTicket,
+      qty: parseInt(newTicket.qty) || 1,
+      qtyAvailable: 0, // will be sold immediately
+      cost: parseFloat(newTicket.cost) || 0,
+      status: "Sold",
+    });
+    onClose();
   };
 
-  if (!sale) return null;
+  const fmtD = (d) => {
+    if (!d) return "";
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      return parseInt(m[3]) + " " + months[parseInt(m[2])-1] + " " + m[1];
+    }
+    return d;
+  };
+
+  const overlay = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    zIndex: 1000, padding: 20,
+  };
+
+  const modal = {
+    background: "#fff", borderRadius: 16,
+    width: "100%", maxWidth: 620, maxHeight: "90vh",
+    display: "flex", flexDirection: "column",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+    overflow: "hidden",
+  };
+
+  const inputStyle = {
+    width: "100%", padding: "8px 10px", borderRadius: 8,
+    border: "1px solid #e2e6ea", fontSize: 12, fontFamily: FONT,
+    outline: "none", background: "#fafbfc", color: "#111827",
+    boxSizing: "border-box",
+  };
 
   return (
-    <>
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(40px); opacity: 0; }
-          to   { transform: translateX(0);    opacity: 1; }
-        }
-        .msmInput {
-          width: 100%; box-sizing: border-box;
-          border: 1px solid #e2e6ea; border-radius: 7px;
-          padding: 8px 10px; font-size: 13px;
-          font-family: ${FONT}; color: #111827;
-          outline: none; background: #fff;
-          transition: border-color 0.15s;
-        }
-        .msmInput:focus { border-color: #1a3a6e; }
-        .msmTicketRow:hover { background: #f7f8fa !important; }
-        .msmTicketRow.selected { background: rgba(26,58,110,0.05) !important; border-color: rgba(26,58,110,0.3) !important; }
-      `}</style>
+    <div style={overlay} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={modal}>
 
-      <div style={OVERLAY} onClick={e => { if (e.target === e.currentTarget) onClose?.(); }}>
-        <div style={PANEL}>
-
-          {/* Header */}
-          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f0f0f3", flexShrink: 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>Match Sale</div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>
-                  Link this sale to an inventory record so cost &amp; profit can be calculated.
-                </div>
+        {/* Header */}
+        <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #f0f0f3", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", fontFamily: FONT, letterSpacing: "-0.3px" }}>
+                Match Sale to Inventory
               </div>
-              <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4, borderRadius: 5 }}>✕</button>
-            </div>
-
-            <div style={{ marginTop: 12, background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "8px 12px", display: "flex", gap: 12, alignItems: "center" }}>
-              <span style={{ fontSize: 18 }}>⚠️</span>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>{sale.eventName}</div>
-                <div style={{ fontSize: 11, color: "#a16207", marginTop: 2 }}>
-                  {sale.qtySold}× · {sale.section || "No section"}{sale.date ? ` · ${sale.date}` : ""}
+              {/* Sale summary — uses resolved event name */}
+              <div style={{
+                marginTop: 8, padding: "8px 12px",
+                background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
+                border: "1px solid #fcd34d", borderRadius: 8,
+                display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#92400e" }}>
+                  {eventName || "Unidentified Event"}
+                </span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {sale.sellingPlatform && (
+                    <span style={{ fontSize: 11, fontFamily: "monospace", background: "rgba(245,158,11,0.15)", borderRadius: 4, padding: "1px 6px", color: "#a16207" }}>
+                      {sale.sellingPlatform}
+                    </span>
+                  )}
+                  {sale.qtySold && <span style={{ fontSize: 11, color: "#a16207" }}>{sale.qtySold}× tickets</span>}
+                  {sale.salePrice > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#a16207" }}>{fmt(sale.salePrice)}</span>}
+                  {sale.section && <span style={{ fontSize: 11, color: "#a16207" }}>Sec {sale.section}</span>}
+                  {sale.row     && <span style={{ fontSize: 11, color: "#a16207" }}>Row {sale.row}</span>}
+                  {sale.date    && <span style={{ fontSize: 11, color: "#a16207" }}>{fmtD(sale.date)}</span>}
                 </div>
               </div>
             </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af", padding: "2px 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
           </div>
 
           {/* Tabs */}
-          <div style={{ display: "flex", borderBottom: "1px solid #f0f0f3", flexShrink: 0 }}>
-            {[["link", "🔗 Link Existing"], ["create", "➕ Create New"]].map(([key, label]) => (
-              <button key={key} onClick={() => setTab(key)} style={{
-                flex: 1, padding: "12px 0", border: "none", background: "transparent",
-                fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
-                color: tab === key ? "#1a3a6e" : "#6b7280",
-                borderBottom: tab === key ? "2px solid #1a3a6e" : "2px solid transparent",
-              }}>{label}</button>
+          <div style={{ display: "flex", gap: 4, marginTop: 12 }}>
+            {["Match existing", "Create new ticket"].map(tab => (
+              <button key={tab} onClick={() => setShowNew(tab === "Create new ticket")}
+                style={{
+                  padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  fontFamily: FONT, cursor: "pointer", border: "none",
+                  background: (tab === "Create new ticket") === showNew ? "#1a3a6e" : "#f1f4f8",
+                  color: (tab === "Create new ticket") === showNew ? "white" : "#6b7280",
+                  transition: "all 0.15s",
+                }}>
+                {tab}
+              </button>
             ))}
           </div>
+        </div>
 
-          {/* Tab content */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px" }}>
 
-            {/* LINK TAB */}
-            {tab === "link" && (
-              <>
-                <input
-                  className="msmInput"
-                  placeholder="Search by event, section, row, order ref…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  style={{ marginBottom: 12 }}
-                />
-                {filtered.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af", fontSize: 13 }}>
-                    No tickets found{search ? ` for "${search}"` : ""}
-                    <div style={{ marginTop: 8 }}>
-                      <button onClick={() => setTab("create")} style={{ fontSize: 12, color: "#1a3a6e", background: "none", border: "none", cursor: "pointer", fontFamily: FONT, textDecoration: "underline" }}>
-                        Create a new ticket instead
-                      </button>
-                    </div>
+          {!showNew ? (
+            <>
+              {candidates.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>📦</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>No available tickets</div>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>All inventory is sold or unavailable</div>
+                  <button onClick={() => setShowNew(true)} style={{ marginTop: 12, background: "#1a3a6e", color: "white", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                    Create a new ticket instead
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontFamily: FONT }}>
+                    Select the ticket(s) that were sold. Best matches shown first.
                   </div>
-                ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {filtered.map(t => {
-                      const isSelected = selectedIds.includes(t.id);
-                      const statusStyle = TICKET_STATUS_STYLES[t.status] || TICKET_STATUS_STYLES.Unsold;
+                    {candidates.map(t => {
+                      const isSelected = selected.has(t.id);
+                      const platformColor = PLATFORM_COLORS[t.buyingPlatform] || PLATFORM_COLORS.Default;
                       return (
-                        <div
-                          key={t.id}
-                          className={`msmTicketRow${isSelected ? " selected" : ""}`}
-                          onClick={() => toggleTicket(t.id)}
-                          style={{ border: `1px solid ${isSelected ? "rgba(26,58,110,0.3)" : "#e2e6ea"}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer", background: isSelected ? "rgba(26,58,110,0.05)" : "#fff" }}
+                        <div key={t.id} onClick={() => toggle(t.id)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 12,
+                            padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                            border: `1.5px solid ${isSelected ? "#1a3a6e" : "#e2e6ea"}`,
+                            background: isSelected ? "rgba(26,58,110,0.04)" : "#fafbfc",
+                            transition: "all 0.12s",
+                          }}
+                          onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#f1f4f8"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(26,58,110,0.04)" : "#fafbfc"; }}
                         >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.event}</div>
-                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                {t.section && <span style={{ background: "#eff6ff", color: "#1d4ed8", borderRadius: 4, padding: "1px 5px", fontSize: 10, fontWeight: 600 }}>{t.section}</span>}
-                                {t.row     && <span style={{ background: "#f0fdf4", color: "#166534", borderRadius: 4, padding: "1px 5px", fontSize: 10, fontWeight: 600 }}>Row {t.row}</span>}
-                                {t.seats   && <span style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 4, padding: "1px 5px", fontSize: 10, fontWeight: 600 }}>{t.seats}</span>}
-                                {t.date    && <span>{t.date}</span>}
-                              </div>
+                          {/* Checkbox */}
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                            border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d5db"}`,
+                            background: isSelected ? "#1a3a6e" : "transparent",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            {isSelected && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                          </div>
+
+                          {/* Ticket info */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
+                                {t.event || "Unknown Event"}
+                              </span>
+                              {t._score > 0 && (
+                                <span style={{ fontSize: 9, fontWeight: 700, color: "#059669", background: "rgba(5,150,105,0.1)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, padding: "1px 6px", flexShrink: 0 }}>
+                                  Best match
+                                </span>
+                              )}
                             </div>
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, marginLeft: 8, flexShrink: 0 }}>
-                              <span style={{ fontSize: 10, fontWeight: 700, background: statusStyle.bg, color: statusStyle.text, borderRadius: 10, padding: "2px 7px" }}>{t.status}</span>
-                              {(t.cost || 0) > 0 && <span style={{ fontSize: 11, color: "#374151", fontWeight: 600 }}>£{(t.cost || 0).toFixed(2)}</span>}
+                            <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
+                              {t.section && <span style={{ background: "#eef2ff", color: "#1a3a6e", border: "1px solid #c7d2fe", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>Sec {t.section}</span>}
+                              {t.row     && <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>Row {t.row}</span>}
+                              {t.seats   && <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>{t.seats}</span>}
+                              {t.date    && <span style={{ fontSize: 10, color: "#6b7280" }}>{fmtD(t.date)}</span>}
+                              {t.buyingPlatform && (
+                                <span style={{ fontSize: 10, fontWeight: 600, color: platformColor, background: `${platformColor}14`, border: `1px solid ${platformColor}30`, borderRadius: 4, padding: "1px 6px" }}>
+                                  {t.buyingPlatform}
+                                </span>
+                              )}
+                              {t.orderRef && <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace" }}>#{t.orderRef}</span>}
                             </div>
                           </div>
-                          {t.orderRef && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>Ref: {t.orderRef}</div>}
+
+                          {/* Cost + availability */}
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            {t.cost > 0 && <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FONT }}>{fmt(t.cost)}</div>}
+                            <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+                              {t.qtyAvailable ?? t.qty ?? 1} available
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </>
-            )}
-
-            {/* CREATE TAB */}
-            {tab === "create" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 4px" }}>
-                  Record the purchase details. The ticket will be saved to inventory and linked to this sale.
-                </p>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
-                  <FormRow label="Event *">
-                    <input className="msmInput" value={form.event} onChange={e => setField("event", e.target.value)} placeholder="Event name" />
-                  </FormRow>
-                  <FormRow label="Category">
-                    <select className="msmInput" value={form.category} onChange={e => setField("category", e.target.value)}>
-                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                  </FormRow>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
-                  <FormRow label="Date">
-                    <input className="msmInput" value={form.date} onChange={e => setField("date", e.target.value)} placeholder="2026-03-18" />
-                  </FormRow>
-                  <FormRow label="Venue">
-                    <input className="msmInput" value={form.venue} onChange={e => setField("venue", e.target.value)} placeholder="Venue name" />
-                  </FormRow>
-                </div>
-
-                <FormRow label="Section">
-                  <input className="msmInput" value={form.section} onChange={e => setField("section", e.target.value)} placeholder="e.g. Shortside Lower Tier L15" />
-                </FormRow>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <FormRow label="Row">
-                    <input className="msmInput" value={form.row} onChange={e => setField("row", e.target.value)} placeholder="e.g. A" />
-                  </FormRow>
-                  <FormRow label="Seats">
-                    <input className="msmInput" value={form.seats} onChange={e => setField("seats", e.target.value)} placeholder="e.g. 12, 13" />
-                  </FormRow>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
-                  <FormRow label="Qty">
-                    <input className="msmInput" type="number" min={1} value={form.qty} onChange={e => setField("qty", parseInt(e.target.value) || 1)} />
-                  </FormRow>
-                  <FormRow label="Cost per Ticket (£) *">
-                    <input className="msmInput" type="number" step="0.01" min={0} value={form.cost || ""} onChange={e => setField("cost", parseFloat(e.target.value) || 0)} placeholder="0.00" />
-                  </FormRow>
-                </div>
-
-                <FormRow label="Order Ref">
-                  <input className="msmInput" value={form.orderRef} onChange={e => setField("orderRef", e.target.value)} placeholder="e.g. 47-53831/UK3" />
-                </FormRow>
-
-                {(!form.event || !(form.cost > 0)) && (
-                  <div style={{ fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 6, padding: "6px 10px", marginTop: 2 }}>
-                    {!form.event ? "Event name is required." : "Enter a cost price greater than £0."}
-                  </div>
-                )}
+                </>
+              )}
+            </>
+          ) : (
+            // Create new ticket form
+            <div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: FONT }}>
+                Create a new inventory record for this sale. It will be immediately marked as Sold.
               </div>
-            )}
-          </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { label: "Event Name *", key: "event",           type: "text",   placeholder: "e.g. Manchester City vs Arsenal" },
+                  { label: "Date",         key: "date",            type: "date",   placeholder: "" },
+                  { label: "Venue",        key: "venue",           type: "text",   placeholder: "e.g. Etihad Stadium" },
+                  { label: "Section",      key: "section",         type: "text",   placeholder: "e.g. 104" },
+                  { label: "Row",          key: "row",             type: "text",   placeholder: "e.g. G" },
+                  { label: "Seats",        key: "seats",           type: "text",   placeholder: "e.g. 12, 13" },
+                  { label: "Quantity",     key: "qty",             type: "number", placeholder: "1" },
+                  { label: "Cost Paid",    key: "cost",            type: "number", placeholder: "0.00" },
+                  { label: "Platform",     key: "buyingPlatform",  type: "text",   placeholder: "e.g. Ticketmaster" },
+                  { label: "Order Ref",    key: "orderRef",        type: "text",   placeholder: "e.g. TM-123456" },
+                ].map(f => (
+                  <label key={f.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: FONT }}>{f.label}</span>
+                    <input
+                      type={f.type}
+                      placeholder={f.placeholder}
+                      value={newTicket[f.key]}
+                      onChange={e => setNewTicket(p => ({ ...p, [f.key]: e.target.value }))}
+                      style={inputStyle}
+                      onFocus={e => { e.currentTarget.style.borderColor = "#1a3a6e"; e.currentTarget.style.background = "#fff"; }}
+                      onBlur={e => { e.currentTarget.style.borderColor = "#e2e6ea"; e.currentTarget.style.background = "#fafbfc"; }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
-          {/* Footer */}
-          <div style={{ padding: "14px 24px", borderTop: "1px solid #f0f0f3", display: "flex", gap: 8, justifyContent: "flex-end", flexShrink: 0 }}>
-            <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 7, border: "1px solid #e2e6ea", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
-              Cancel
+        {/* Footer */}
+        <div style={{ padding: "12px 20px", borderTop: "1px solid #f0f0f3", display: "flex", justifyContent: "flex-end", gap: 8, flexShrink: 0, background: "#fafbfc" }}>
+          <button onClick={onClose}
+            style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid #e2e6ea", background: "transparent", color: "#374151", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+            Cancel
+          </button>
+          {!showNew ? (
+            <button onClick={handleConfirm} disabled={selected.size === 0}
+              style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: selected.size === 0 ? "#e5e7eb" : "#1a3a6e", color: selected.size === 0 ? "#9ca3af" : "white", fontSize: 12, fontWeight: 700, cursor: selected.size === 0 ? "default" : "pointer", fontFamily: FONT, transition: "all 0.15s" }}>
+              Link {selected.size > 0 ? `${selected.size} ticket${selected.size !== 1 ? "s" : ""}` : "tickets"}
             </button>
-            {tab === "link" ? (
-              <button onClick={handleLink} disabled={selectedIds.length === 0}
-                style={{ padding: "8px 18px", borderRadius: 7, border: "none", background: selectedIds.length ? "#1a3a6e" : "#e2e6ea", color: selectedIds.length ? "#fff" : "#9ca3af", fontSize: 13, fontWeight: 600, cursor: selectedIds.length ? "pointer" : "not-allowed", fontFamily: FONT }}>
-                Link {selectedIds.length > 0 ? `${selectedIds.length} Ticket${selectedIds.length !== 1 ? "s" : ""}` : "Tickets"}
-              </button>
-            ) : (
-              <button onClick={handleCreate} disabled={!form.event || !(form.cost > 0)}
-                style={{ padding: "8px 18px", borderRadius: 7, border: "none", background: form.event && form.cost > 0 ? "#1a3a6e" : "#e2e6ea", color: form.event && form.cost > 0 ? "#fff" : "#9ca3af", fontSize: 13, fontWeight: 600, cursor: form.event && form.cost > 0 ? "pointer" : "not-allowed", fontFamily: FONT }}>
-                Save &amp; Link
-              </button>
-            )}
-          </div>
+          ) : (
+            <button onClick={handleCreateNew} disabled={!newTicket.event}
+              style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: !newTicket.event ? "#e5e7eb" : "#1a3a6e", color: !newTicket.event ? "#9ca3af" : "white", fontSize: 12, fontWeight: 700, cursor: !newTicket.event ? "default" : "pointer", fontFamily: FONT }}>
+              Create & Link
+            </button>
+          )}
         </div>
       </div>
-    </>
-  );
-}
-
-function FormRow({ label, children }) {
-  return (
-    <div>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 4, fontFamily: "Inter, sans-serif" }}>{label}</label>
-      {children}
     </div>
   );
 }

@@ -217,6 +217,13 @@ export default function Inventory({ tickets, setTickets, sales, setSales, events
     notify(`Deleted ${ids.size} tickets`);
   };
 
+  const bulkUpdateStatus = (status) => {
+    const ids = new Set(Object.keys(multiSelected).filter(id => multiSelected[id]));
+    setTickets(p => p.map(t => ids.has(t.id) ? { ...t, status } : t));
+    setMultiSelected({});
+    notify(`${ids.size} ticket${ids.size !== 1 ? "s" : ""} → ${status}`);
+  };
+
   const exportSelected = () => {
     const ids = new Set(Object.keys(multiSelected).filter(id => multiSelected[id]));
     const sel = tickets.filter(t => ids.has(t.id));
@@ -559,8 +566,19 @@ export default function Inventory({ tickets, setTickets, sales, setSales, events
 
       {/* Bulk action bar */}
       {numSelected > 0 && (
-        <div style={{ background: "#111827", borderRadius: 8, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+        <div style={{ background: "#111827", borderRadius: 8, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "white" }}>{numSelected} selected</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {["Unsold", "Listed", "Sold", "Delivered"].map(s => {
+              const st = STATUS_STYLES[s];
+              return (
+                <button key={s} onClick={() => bulkUpdateStatus(s)}
+                  style={{ background: st.bg, color: st.text, border: `1px solid ${st.dot}40`, borderRadius: 7, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />{s}
+                </button>
+              );
+            })}
+          </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button onClick={exportSelected} style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: FONT }}>⬇ Export CSV</button>
             <button onClick={clearSelection} style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: FONT }}>Deselect all</button>
@@ -611,7 +629,7 @@ export default function Inventory({ tickets, setTickets, sales, setSales, events
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#94a3b8", flexShrink: 0 }} />
             <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", letterSpacing: "-0.1px" }}>Completed Stock</span>
             <span style={{ fontSize: 11, color: "#b0b8c4", marginLeft: 2 }}>
-              {Object.keys(buildEventGroups(filteredCompleted)).length} event{Object.keys(buildEventGroups(filteredCompleted)).length !== 1 ? "s" : ""} · {filteredCompleted.length} tickets
+              {Object.keys(completedEventGroups).length} event{Object.keys(completedEventGroups).length !== 1 ? "s" : ""} · {filteredCompleted.length} tickets
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 11, color: "#94a3b8" }}>{showCompleted ? "Hide" : "Show"}</span>
@@ -622,11 +640,11 @@ export default function Inventory({ tickets, setTickets, sales, setSales, events
           {showCompleted && (
             <>
               <ColumnHeaders />
-              {Object.keys(buildEventGroups(filteredCompleted)).length === 0 ? (
+              {Object.keys(completedEventGroups).length === 0 ? (
                 <div style={{ padding: "32px 18px", textAlign: "center" }}>
                   <div style={{ fontSize: 12, color: "#9ca3af" }}>No completed tickets{searchQ ? ` matching "${searchQ}"` : ""}</div>
                 </div>
-              ) : renderEventGroups(buildEventGroups(filteredCompleted), true)}
+              ) : renderEventGroups(completedEventGroups, true)}
             </>
           )}
         </div>

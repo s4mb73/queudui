@@ -70,7 +70,7 @@ export function isStandingTicket(text) {
 export function detectSite(raw) {
   if (/liverpoolfc\.com|@fans\.emails\.liverpoolfc|Liverpool FC Booking Confirmation/i.test(raw)) return 'liverpool';
   if (/ticketmaster\.co\.uk|email\.ticketmaster\.co\.uk/i.test(raw)) return 'ticketmaster_uk';
-  if (/ticketmaster\.com/i.test(raw)) return 'ticketmaster_us';
+  if (/ticketmaster\.com|email\.ticketmaster\.com/i.test(raw)) return 'ticketmaster_us';
   if (/axs\.com|@axs\.com|AXS Tickets/i.test(raw)) return 'axs';
   if (/seetickets\.com|@seetickets/i.test(raw)) return 'seetickets';
   if (/eticketing\.co\.uk/i.test(raw)) return 'eticketing';
@@ -214,21 +214,150 @@ function extractHtmlPart(raw) {
 }
 
 // ── Extract named ticket type from TM Order Summary ───────────────────────────
-// Handles VIP Ticket, Hospitality Package, Premium Ticket etc.
-// These have no Sec/Row/Seat structure but are NOT standing — they get their
-// own section label (e.g. "VIP Ticket").
 function extractTicketTypeName(text) {
-  // Search within the Order Summary block where ticket type labels appear
   const orderSummaryBlock = text.match(/Order\s+Summary[\s\S]{0,2000}?Payment\s+Summary/i);
   const searchIn = orderSummaryBlock ? orderSummaryBlock[0] : text;
-
-  // Match named ticket types — NOT "Mobile Ticket" (that's delivery method)
   const namedTypeM = searchIn.match(
     /\b((?:VIP|Hospitality|Premium|Platinum|Gold|Silver|Bronze|Club|Executive|Lounge|Padded\s+Seat|Super\s+Pit|Track\s+Club)[^\n\r]{0,30}?(?:Ticket|Package|Admission|Access|Experience))\b/i
   );
   if (namedTypeM) return namedTypeM[1].replace(/\s+/g, ' ').trim().substring(0, 60);
-
   return null;
+}
+
+// ── Ticketmaster USA parser ───────────────────────────────────────────────────
+// Handles: "You Got Tickets To EVENT" subject
+// Date format: "Fri · Apr 03, 2026 · 7:00 PM"
+// Seat format: "Sec&nbsp;543, Row&nbsp;21, Seat&nbsp;8 - 9"
+// Total:       "Total:&nbsp; $340.30"
+// Returns ARRAY of tickets (one per seat), currency USD
+export function parseTicketmasterUSEmail(raw) {
+  // ── Order ref ──────────────────────────────────────────────────────────────
+  const orderM = raw.match(/Order\s*#\s*([A-Z0-9\-\/]+)/i);
+  const orderRef = orderM ? orderM[1].trim() : '';
+
+  // ── Event name (from Subject header) ──────────────────────────────────────
+  const subjectM = raw.match(/^Subject:\s*(.+)$/im);
+  const subject = subjectM ? subjectM[1].trim() : '';
+  let event = '';
+  const subjectEventM = subject.match(/^You Got Tickets To\s+(.+)$/i);
+  if (subjectEventM) {
+    event = subjectEventM[1].trim().substring(0, 80);
+  }
+  // Fallback: event name in bold semibold td
+  if (!event) {
+    const evFbM = raw.match(/font-size:\s*20px[^>]*600[^>]*>\s*\n?\s*([^\n<]{5,80})\s*\n?\s*<!--|font-size: 20px[^"]*"[^>]*>\s*([^\n<]{5,80}?)\s*(?:<!--|<)/i);
+    if (evFbM) event = (evFbM[1] || evFbM[2] || '').trim().substring(0, 80);
+  }
+
+  // ── Date & time ────────────────────────────────────────────────────────────
+  // Pattern in HTML td: "Fri · Apr 03, 2026 · 8:00 PM"
+  let date = '', time = '';
+  const dateHtmlM = raw.match(
+    /width="300"[^>]*>\s*\n?\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s*[·•]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}\s*[·•]\s*\d{1,2}:\d{2}\s*(?:AM|PM))/i
+  );
+  if (dateHtmlM) {
+    const raw2 = dateHtmlM[1].replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    const parts = raw2.split(/\s*[·•]\s*/);
+    // [0]=dayName  [1]="Apr 03, 2026"  [2]="7:00 PM"
+    if (parts.length >= 3) {
+      date = parts[1].trim();
+      time = parts[2].trim();
+    } else if (parts.length === 2) {
+      date = parts[0].trim();
+      time = parts[1].trim();
+    }
+  }
+
+  // ── Venue ──────────────────────────────────────────────────────────────────
+  // "Yankee Stadium &mdash; Bronx, New York" in a td width="300"
+  let venue = '';
+  const venueHtmlM = raw.match(
+    /width="300"[^>]*>\s*\n?\s*([A-Z][a-zA-Z0-9\s'\.]+(?:Stadium|Arena|Centre|Center|Theater|Theatre|Amphitheater|Field|Garden|Hall|Park|Forum|Center)[^<\n]*)/i
+  );
+  if (venueHtmlM) {
+    venue = venueHtmlM[1]
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 80);
+  }
+
+  // ── Section / Row / Seats ──────────────────────────────────────────────────
+  // "Sec&nbsp;218B, Row&nbsp;6, Seat&nbsp;5 - 8"
+  let section = '', row = '', seats = '';
+  const seatHtmlM = raw.match(
+    /Sec&nbsp;([\w\d]+),\s*Row&nbsp;([\w\d]+),\s*Seat&nbsp;([\d\s\-–]+)/i
+  );
+  if (seatHtmlM) {
+    section = seatHtmlM[1].trim();
+    row = seatHtmlM[2].trim();
+    const seatRaw = seatHtmlM[3].trim();
+    const rangeM = seatRaw.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+    if (rangeM) {
+      const lo = Math.min(parseInt(rangeM[1]), parseInt(rangeM[2]));
+      const hi = Math.max(parseInt(rangeM[1]), parseInt(rangeM[2]));
+      seats = Array.from({ length: hi - lo + 1 }, (_, i) => String(lo + i)).join(', ');
+    } else {
+      seats = seatRaw;
+    }
+  }
+
+  // Fallback: check stripped text for seated structure
+  if (!section) {
+    const htmlPart = extractHtmlPart(raw);
+    const text = htmlPart ? stripHtml(htmlPart) : (isHtmlEmail(raw) ? stripHtml(raw) : raw);
+    const inlineM = text.match(/Sec(?:tion)?\s*([\w\d]+)[,·\s]+Row\s*([\w\d]+)[,·\s]+Seat[s]?\s*([\d\s,\-–]+)/i);
+    if (inlineM) {
+      section = inlineM[1].trim();
+      row = inlineM[2].trim();
+      const seatRaw = inlineM[3].trim();
+      const rangeM = seatRaw.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      if (rangeM) {
+        const lo = Math.min(parseInt(rangeM[1]), parseInt(rangeM[2]));
+        const hi = Math.max(parseInt(rangeM[1]), parseInt(rangeM[2]));
+        seats = Array.from({ length: hi - lo + 1 }, (_, i) => String(lo + i)).join(', ');
+      } else {
+        seats = seatRaw;
+      }
+    }
+  }
+
+  // ── Total cost (USD) ───────────────────────────────────────────────────────
+  // "Total:&nbsp; $827.40"
+  let costUSD = 0;
+  const totalM = raw.match(/Total[:\s]*(?:&nbsp;|\s)*\$\s*([\d,]+\.?\d*)/i);
+  if (totalM) costUSD = parseFloat(totalM[1].replace(/,/g, ''));
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const seatList = seats
+    ? seats.split(',').map(s => s.trim()).filter(Boolean)
+    : [''];
+  const qty = seatList.length || 1;
+  const costPerTicket = qty > 0 ? parseFloat((costUSD / qty).toFixed(2)) : costUSD;
+  const category = detectCategory(event + ' ' + venue);
+
+  // Return one ticket object per seat (same as TM UK parser)
+  return seatList.map(seat => ({
+    event,
+    date,
+    time,
+    venue,
+    section,
+    row,
+    seats: seat,
+    qty: 1,
+    costPrice: costPerTicket,
+    orderRef,
+    restrictions: '',
+    isStanding: false,
+    category,
+    buyingPlatform: 'Ticketmaster',
+    originalCurrency: 'USD',
+    originalAmount: costPerTicket,
+    confidence: event ? 'high' : 'medium',
+  }));
 }
 
 // ── Ticketmaster UK parser ────────────────────────────────────────────────────
@@ -323,8 +452,6 @@ export function parseTicketmasterEmail(raw) {
   const hasSeatStructure = /(?:Sec(?:tion)?|Block)\s*\d+|Row\s*\d+|\bSeat[s]?\s*\d+/i.test(text);
 
   // ── Named ticket type — VIP, Hospitality, Premium, etc. ───────────────────
-  // Must check BEFORE standing detection. Named types have no seat structure
-  // but are not standing — they get their own section label.
   const namedTicketType = !hasSeatStructure ? extractTicketTypeName(text) : null;
 
   if (namedTicketType) {
@@ -421,6 +548,7 @@ export function parseEmail(raw, site) {
   const detectedSite = site || detectSite(raw);
   if (detectedSite === 'liverpool')       return parseLiverpoolEmail(raw)[0];
   if (detectedSite === 'ticketmaster_uk') return parseTicketmasterEmail(raw)[0];
+  if (detectedSite === 'ticketmaster_us') return parseTicketmasterUSEmail(raw)[0];
 
   const text = isHtmlEmail(raw) ? stripHtml(raw) : raw;
   const find = (patterns) => {

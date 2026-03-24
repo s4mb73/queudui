@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
+// ── Events ───────────────────────────────────────────────────────────────────
+
 function dbToEvent(row) {
   return {
     id:        row.id,
@@ -12,6 +14,8 @@ function dbToEvent(row) {
     createdAt: row.created_at,
   };
 }
+
+// ── Tickets ──────────────────────────────────────────────────────────────────
 
 function dbToTicket(row) {
   return {
@@ -66,6 +70,15 @@ function ticketToDb(t) {
   };
 }
 
+// ── Sales ────────────────────────────────────────────────────────────────────
+
+// Migrate legacy sale statuses to the new two-state model
+function migrateSaleStatus(status) {
+  if (!status || status === 'Sold' || status === 'Pending') return 'Awaiting Delivery';
+  if (status === 'Delivered') return 'Delivered';
+  return status; // pass through anything else (e.g. already "Awaiting Delivery")
+}
+
 function dbToSale(row, ticketIdsBySaleId) {
   return {
     id:              row.id,
@@ -75,7 +88,7 @@ function dbToSale(row, ticketIdsBySaleId) {
     qtySold:         row.qty_sold || 1,
     salePrice:       parseFloat(row.sale_price) || 0,
     salePriceEach:   parseFloat(row.sale_price_each) || 0,
-    saleStatus:      row.sale_status || 'Pending',
+    saleStatus:      migrateSaleStatus(row.sale_status),
     section:         row.section || '',
     row:             row.row || '',
     seats:           row.seats || '',
@@ -108,20 +121,25 @@ function saleToDb(s) {
   };
 }
 
+// ── Main hook ────────────────────────────────────────────────────────────────
+
 const POLL_INTERVAL_MS = 30_000;
 
 export function useQueudData() {
-  const [events, setEventsState]     = useState([]);
-  const [tickets, setTicketsState]   = useState([]);
-  const [sales, setSalesState]       = useState([]);
-  const [settings, setSettingsState] = useState({ gmailAccounts: [], openAiKey: '', extra: {} });
-  const [loading, setLoading]        = useState(true);
-  const [error, setError]            = useState(null);
+  const [events, setEventsState]         = useState([]);
+  const [tickets, setTicketsState]       = useState([]);
+  const [sales, setSalesState]           = useState([]);
+  const [settings, setSettingsState]     = useState({ gmailAccounts: [], openAiKey: '', extra: {} });
+  const [loading, setLoading]            = useState(true);
+  const [error, setError]                = useState(null);
 
   const localMutationIds = useRef(new Set());
 
+  // ── Load sale_tickets junction ────────────────────────────────────────────
   async function loadSaleTicketMap() {
-    const { data, error } = await supabase.from('sale_tickets').select('sale_id, ticket_id');
+    const { data, error } = await supabase
+      .from('sale_tickets')
+      .select('sale_id, ticket_id');
     if (error) { console.warn('sale_tickets load error:', error.message); return {}; }
     const map = {};
     (data || []).forEach(({ sale_id, ticket_id }) => {
@@ -295,12 +313,7 @@ export function useQueudData() {
 
       if (toUpsert.length > 0) {
         supabase.from('tickets').upsert(toUpsert.map(ticketToDb)).then(({ error }) => {
-          if (error) {
-            console.error('Ticket upsert error:', error);
-          } else {
-            // Clear mutation lock once DB confirms — allows poll to pick up future server changes
-            toUpsert.forEach(t => localMutationIds.current.delete(t.id));
-          }
+          if (error) console.error('Ticket upsert error:', error);
         });
       }
       if (toDelete.length > 0) {
@@ -337,21 +350,65 @@ export function useQueudData() {
 
       if (toUpsert.length > 0) {
         supabase.from('sales').upsert(toUpsert.map(saleToDb)).then(({ error }) => {
-          if (error) {
-            console.error('Sale upsert error:', error);
-          } else {
-            // Clear mutation lock once DB confirms
-            toUpsert.forEach(s => localMutationIds.current.delete(s.id));
-          }
+          if (error) console.error('Sale upsert error:', error);
         });
       }
       if (toDelete.length > 0) {
+        // Delete sale_tickets junction rows first, then the sales themselves
+        supabase.from('sale_tickets').delete().in('sale_id', toDelete).then(({ error }) => {
+          if (error) console.error('sale_tickets delete error:', error);
+        });
         supabase.from('sales').delete().in('id', toDelete).then(({ error }) => {
           if (error) console.error('Sale delete error:', error);
         });
       }
 
       return next;
+    });
+  }, []);
+
+  // ── Delete sales and reset their linked tickets ───────────────────────────
+  // Handles local state, DB cleanup of sale_tickets, and ticket status reset.
+
+  const deleteSaleAndResetTickets = useCallback((saleIds) => {
+    const ids = Array.isArray(saleIds) ? saleIds : [saleIds];
+    if (!ids.length) return;
+
+    // Step 1: collect ticketIds from the sales being deleted, then update both states
+    setSalesState(prev => {
+      const salesToDelete  = prev.filter(s => ids.includes(s.id));
+      const ticketIdsToReset = [...new Set(salesToDelete.flatMap(s => s.ticketIds || []))];
+
+      // Step 2: reset linked tickets in local state + DB
+      if (ticketIdsToReset.length > 0) {
+        setTicketsState(tPrev => {
+          const updated = tPrev.map(t =>
+            ticketIdsToReset.includes(t.id)
+              ? { ...t, status: 'Unsold', qtyAvailable: t.qty ?? 1 }
+              : t
+          );
+          // Persist each reset ticket to DB
+          const toUpsert = updated.filter(t => ticketIdsToReset.includes(t.id));
+          supabase.from('tickets')
+            .upsert(toUpsert.map(t => ({ ...ticketToDb(t), status: 'Unsold', qty_available: t.qty ?? 1 })))
+            .then(({ error }) => { if (error) console.error('Ticket reset error:', error); });
+          toUpsert.forEach(t => localMutationIds.current.add(t.id));
+          return updated;
+        });
+      }
+
+      // Step 3: clean up sale_tickets junction rows
+      supabase.from('sale_tickets').delete().in('sale_id', ids).then(({ error }) => {
+        if (error) console.error('sale_tickets delete error:', error);
+      });
+
+      // Step 4: delete the sales from DB
+      supabase.from('sales').delete().in('id', ids).then(({ error }) => {
+        if (error) console.error('Sale delete error:', error);
+      });
+
+      ids.forEach(id => localMutationIds.current.delete(id));
+      return prev.filter(s => !ids.includes(s.id));
     });
   }, []);
 
@@ -368,12 +425,7 @@ export function useQueudData() {
 
     if (Object.keys(dbPatch).length > 0) {
       supabase.from('sales').update(dbPatch).eq('id', saleId).then(({ error }) => {
-        if (error) {
-          console.error('updateSale error:', error);
-        } else {
-          // Clear mutation lock once DB confirms
-          localMutationIds.current.delete(saleId);
-        }
+        if (error) console.error('updateSale error:', error);
       });
     }
   }, []);
@@ -443,6 +495,7 @@ export function useQueudData() {
     settings, setSettings,
     findOrCreateEvent,
     linkTicketsToSale,
+    deleteSaleAndResetTickets,
     loading, error,
   };
 }

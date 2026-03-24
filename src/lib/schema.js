@@ -16,11 +16,15 @@ export const TICKET_STATUS_STYLES = {
 export const SOLD_STATUSES = new Set(["Sold", "Delivered", "Completed"]);
 
 // ── Sale statuses ─────────────────────────────────────────────────────────────
-export const SALE_STATUSES = ["Sold", "Delivered"];
+// "Awaiting Delivery" = confirmed sale, tickets not yet transferred to buyer
+// "Delivered"         = tickets transferred, fully complete
+export const SALE_STATUSES = ["Awaiting Delivery", "Delivered"];
 
 export const SALE_STATUS_STYLES = {
-  Sold:      { bg: "rgba(5,150,105,0.08)",   text: "#059669", dot: "#059669", border: "rgba(5,150,105,0.2)" },
-  Delivered: { bg: "rgba(249,115,22,0.08)",  text: "#f97316", dot: "#f97316", border: "rgba(249,115,22,0.2)" },
+  // Legacy fallback — old "Sold" records auto-migrate to "Awaiting Delivery"
+  "Sold":              { bg: "rgba(249,115,22,0.08)",  text: "#c2410c", dot: "#f97316", border: "rgba(249,115,22,0.2)" },
+  "Awaiting Delivery": { bg: "rgba(249,115,22,0.08)",  text: "#c2410c", dot: "#f97316", border: "rgba(249,115,22,0.2)" },
+  "Delivered":         { bg: "rgba(5,150,105,0.08)",   text: "#059669", dot: "#059669", border: "rgba(5,150,105,0.2)" },
 };
 
 // ── Platform colours ──────────────────────────────────────────────────────────
@@ -73,7 +77,7 @@ export const BLANK_SALE = {
   id: "", eventId: "", sellingPlatform: "",
   orderId: "", qtySold: 1,
   salePrice: 0, salePriceEach: 0,
-  saleStatus: "Sold",
+  saleStatus: "Awaiting Delivery",
   date: "", notes: "",
   ticketIds: [],
   section: "", row: "", seats: "",

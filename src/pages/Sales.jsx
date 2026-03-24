@@ -70,7 +70,7 @@ function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale
     </div>
   );
 
-  const st = SALE_STATUS_STYLES[sale.saleStatus] || SALE_STATUS_STYLES.Sold;
+  const st = SALE_STATUS_STYLES[sale.saleStatus] || SALE_STATUS_STYLES["Awaiting Delivery"];
 
   return (
     <div style={{ background: "#f7f8fa", borderTop: "1px solid #e2e6ea", padding: "16px 24px 20px" }}>
@@ -135,7 +135,7 @@ function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale
             <div style={{ display: "flex", gap: 6 }}>
               {SALE_STATUSES.map(s => {
                 const sStyle = SALE_STATUS_STYLES[s];
-                const active = (sale.saleStatus || "Sold") === s;
+                const active = (sale.saleStatus || "Awaiting Delivery") === s;
                 return (
                   <button key={s} onClick={() => updateSaleStatus(sale.id, s)}
                     style={{ padding: "4px 12px", borderRadius: 20, border: `1px solid ${active ? sStyle.dot : "#e2e6ea"}`, background: active ? sStyle.bg : "transparent", color: active ? sStyle.text : "#6b7280", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}>
@@ -160,7 +160,7 @@ function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale
 }
 
 // ── Unmatched Sale Card ───────────────────────────────────────────────────────
-function UnmatchedSaleCard({ sale, tickets, eventMap, onMatch }) {
+function UnmatchedSaleCard({ sale, tickets, eventMap, onMatch, onDelete }) {
   function saleEventName(s) { return eventMap[s.eventId]?.name || s.eventName || "Unknown Event"; }
 
   return (
@@ -188,30 +188,44 @@ function UnmatchedSaleCard({ sale, tickets, eventMap, onMatch }) {
           {sale.orderId && <span>Order #{sale.orderId}</span>}
         </div>
       </div>
-      <div style={{ flexShrink: 0, textAlign: "right" }}>
-        <div style={{ fontSize: 11, color: "#b45309", background: "rgba(245,158,11,0.1)", border: "1px solid #fcd34d", borderRadius: 6, padding: "3px 8px", marginBottom: 8, fontWeight: 600 }}>
+      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+        <div style={{ fontSize: 11, color: "#b45309", background: "rgba(245,158,11,0.1)", border: "1px solid #fcd34d", borderRadius: 6, padding: "3px 8px", fontWeight: 600 }}>
           No inventory linked
         </div>
-        <button
-          onClick={() => onMatch(sale)}
-          style={{
-            background: "#f59e0b", color: "white",
-            border: "none", borderRadius: 7,
-            padding: "7px 14px", fontSize: 12, fontWeight: 700,
-            cursor: "pointer", fontFamily: FONT,
-            display: "flex", alignItems: "center", gap: 5,
-            transition: "all 0.15s",
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = "#d97706"}
-          onMouseLeave={e => e.currentTarget.style.background = "#f59e0b"}>
-          🔗 Match to Inventory
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            onClick={() => onDelete(sale.id)}
+            style={{
+              background: "rgba(239,68,68,0.08)", color: "#ef4444",
+              border: "1px solid rgba(239,68,68,0.2)", borderRadius: 7,
+              padding: "6px 10px", fontSize: 11, fontWeight: 600,
+              cursor: "pointer", fontFamily: FONT,
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.14)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(239,68,68,0.08)"}>
+            🗑 Delete
+          </button>
+          <button
+            onClick={() => onMatch(sale)}
+            style={{
+              background: "#f59e0b", color: "white",
+              border: "none", borderRadius: 7,
+              padding: "7px 14px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: FONT,
+              display: "flex", alignItems: "center", gap: 5,
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "#d97706"}
+            onMouseLeave={e => e.currentTarget.style.background = "#f59e0b"}>
+            🔗 Match to Inventory
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-export default function Sales({ tickets, sales, setSales, updateSale, linkTicketsToSale, events, setShowAddSale, notify }) {
+export default function Sales({ tickets, sales, setSales, updateSale, setTickets, deleteSaleAndResetTickets, linkTicketsToSale, events, setShowAddSale, notify }) {
   const [expandedEvents, setExpandedEvents]   = useState({});
   const [expandedSales, setExpandedSales]     = useState({});
   const [filterStatus, setFilterStatus]       = useState("All");
@@ -248,6 +262,12 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
     }
   }, [unmatchedSales.length]);
 
+  const deleteUnmatchedSale = (saleId) => {
+    if (!window.confirm("Delete this unmatched sale?")) return;
+    setSales(prev => prev.filter(s => s.id !== saleId));
+    notify?.("Sale deleted");
+  };
+
   const handleLink = async (saleId, ticketIds) => {
     setMatchingSale(null);
     if (linkTicketsToSale) await linkTicketsToSale(saleId, ticketIds);
@@ -274,7 +294,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
   // ── Filtered event groups — only matched sales ─────────────────────────────
   const eventGroups = useMemo(() => {
     const filtered = matchedSales.filter(s => {
-      if (filterStatus !== "All" && (s.saleStatus || "Sold") !== filterStatus) return false;
+      if (filterStatus !== "All" && (s.saleStatus || "Awaiting Delivery") !== filterStatus) return false;
       if (filterPlatform !== "All" && s.sellingPlatform !== filterPlatform) return false;
       if (searchQ) {
         const q = searchQ.toLowerCase();
@@ -316,19 +336,28 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
 
   const deleteSale = (saleId, e) => {
     e.stopPropagation();
-    if (!window.confirm("Delete this sale record?")) return;
-    setSales(prev => prev.filter(s => s.id !== saleId));
+    if (!window.confirm("Delete this sale record? Linked tickets will be reset to Unsold.")) return;
+    if (deleteSaleAndResetTickets) {
+      deleteSaleAndResetTickets([saleId]);
+    } else {
+      setSales(prev => prev.filter(s => s.id !== saleId));
+    }
     setSelected(prev => { const n = new Set(prev); n.delete(saleId); return n; });
-    notify?.("Sale deleted");
+    notify?.("Sale deleted · tickets reset to Unsold");
   };
 
   const toggleSelect    = (id, e) => { e.stopPropagation(); setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
   const toggleSelectAll = () => { const all = matchedSales.map(s => s.id); setSelected(selected.size === all.length ? new Set() : new Set(all)); };
   const massDelete = () => {
     if (!selected.size) return;
-    if (!window.confirm(`Delete ${selected.size} sale${selected.size !== 1 ? "s" : ""}?`)) return;
-    setSales(prev => prev.filter(s => !selected.has(s.id)));
-    notify?.(`Deleted ${selected.size} sales`);
+    if (!window.confirm(`Delete ${selected.size} sale${selected.size !== 1 ? "s" : ""}? Linked tickets will be reset to Unsold.`)) return;
+    const ids = [...selected];
+    if (deleteSaleAndResetTickets) {
+      deleteSaleAndResetTickets(ids);
+    } else {
+      setSales(prev => prev.filter(s => !selected.has(s.id)));
+    }
+    notify?.(`Deleted ${selected.size} sales · tickets reset to Unsold`);
     setSelected(new Set());
   };
 
@@ -419,6 +448,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
                   tickets={tickets}
                   eventMap={eventMap}
                   onMatch={setMatchingSale}
+                  onDelete={deleteUnmatchedSale}
                 />
               ))}
             </div>
@@ -586,7 +616,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
                 const sProfit        = (s.salePrice || 0) - costTotal;
                 const isSelected     = selected.has(s.id);
                 const isSaleExpanded = expandedSales[s.id];
-                const st             = SALE_STATUS_STYLES[s.saleStatus] || SALE_STATUS_STYLES.Sold;
+                const st             = SALE_STATUS_STYLES[s.saleStatus] || SALE_STATUS_STYLES["Awaiting Delivery"];
 
                 return (
                   <div key={s.id}>
@@ -647,7 +677,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, linkTicket
                       <div style={{ width: COL.status, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: st.bg, color: st.text, borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 600, fontFamily: FONT }}>
                           <div style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} />
-                          {s.saleStatus || "Sold"}
+                          {s.saleStatus || "Awaiting Delivery"}
                         </div>
                       </div>
 

@@ -39,6 +39,7 @@ export default function App() {
     sales, setSales, updateSale,
     settings, setSettings,
     findOrCreateEvent, linkTicketsToSale,
+    deleteSaleAndResetTickets,
     loading, error,
   } = useQueudData();
 
@@ -59,8 +60,8 @@ export default function App() {
   const saveTicket = async () => {
     if (!tf.event || !tf.cost) return notify("Fill in event name and cost", "err");
 
-    const cost         = parseFloat(tf.cost) || 0;
-    const qty          = parseInt(tf.qty) || 1;
+    const cost          = parseFloat(tf.cost) || 0;
+    const qty           = parseInt(tf.qty) || 1;
     const costPerTicket = parseFloat(tf.costPerTicket) || parseFloat((cost / qty).toFixed(2));
 
     // Find or create the event row
@@ -76,10 +77,16 @@ export default function App() {
     }
 
     if (editingTicket) {
-      setTickets(prev => prev.map(t => t.id === editingTicket.id
-        ? { ...tf, id: t.id, eventId, qty, cost, costPerTicket,
-            qtyAvailable: (t.qtyAvailable ?? t.qty) + (qty - t.qty) }
-        : t));
+      setTickets(prev => prev.map(t => {
+        if (t.id !== editingTicket.id) return t;
+        const oldQty   = t.qty ?? 1;
+        const oldAvail = t.qtyAvailable ?? oldQty;
+        // soldQty = how many of the original qty have already been sold/delivered
+        const soldQty  = oldQty - oldAvail;
+        // new available = new total minus already sold, clamped to 0
+        const newAvail = Math.max(0, qty - soldQty);
+        return { ...tf, id: t.id, eventId, qty, cost, costPerTicket, qtyAvailable: newAvail };
+      }));
       notify("Ticket updated");
     } else {
       setTickets(prev => [...prev, {
@@ -270,6 +277,8 @@ export default function App() {
             <Sales
               tickets={tickets} sales={sales}
               setSales={setSales} updateSale={updateSale}
+              setTickets={setTickets}
+              deleteSaleAndResetTickets={deleteSaleAndResetTickets}
               linkTicketsToSale={linkTicketsToSale}
               events={events}
               setShowAddSale={setShowAddSale}
