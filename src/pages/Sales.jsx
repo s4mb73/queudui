@@ -180,7 +180,7 @@ function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale
 }
 
 // ── Unmatched Sales Table (compact, grouped by event) ─────────────────────────
-function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelete }) {
+function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelete, duplicates }) {
   const [expandedGroups, setExpandedGroups] = useState({});
 
   function saleEventName(s) { return eventMap[s.eventId]?.name || s.eventName || "Unknown Event"; }
@@ -270,10 +270,17 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
                   <span style={{ fontSize: 11, color: "#d1d5db", flexShrink: 0 }}>—</span>
                 )}
 
-                {/* Order ID */}
-                <span style={{ flex: 1, fontSize: 11, color: "#94a3b8", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {sale.orderId ? `#${sale.orderId}` : ""}
-                </span>
+                {/* Order ID + duplicate badge */}
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                  <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {sale.orderId ? `#${sale.orderId}` : ""}
+                  </span>
+                  {duplicates?.[sale.id] && (
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
+                      DUPE
+                    </span>
+                  )}
+                </div>
 
                 {/* Match button */}
                 <button
@@ -340,6 +347,52 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
   const matchedSales = useMemo(() =>
     sales.filter(s => s.ticketIds && s.ticketIds.length > 0), [sales]
   );
+
+  // ── Duplicate detection ─────────────────────────────────────────────────────
+  const duplicates = useMemo(() => {
+    const byOrderId = {};
+    sales.forEach(s => {
+      if (!s.orderId) return;
+      const key = `${s.orderId}_${s.sellingPlatform || ""}`;
+      if (!byOrderId[key]) byOrderId[key] = [];
+      byOrderId[key].push(s);
+    });
+    const dupes = {};
+    Object.entries(byOrderId).forEach(([, group]) => {
+      if (group.length > 1) {
+        group.forEach(s => { dupes[s.id] = group.length; });
+      }
+    });
+    return dupes;
+  }, [sales]);
+
+  const duplicateCount = Object.keys(duplicates).length;
+
+  const removeDuplicates = () => {
+    const byOrderId = {};
+    sales.forEach(s => {
+      if (!s.orderId) return;
+      const key = `${s.orderId}_${s.sellingPlatform || ""}`;
+      if (!byOrderId[key]) byOrderId[key] = [];
+      byOrderId[key].push(s);
+    });
+    const idsToRemove = new Set();
+    Object.values(byOrderId).forEach(group => {
+      if (group.length <= 1) return;
+      // Keep the one with ticketIds (matched), or the first one
+      const sorted = [...group].sort((a, b) => {
+        const aLinked = (a.ticketIds || []).length;
+        const bLinked = (b.ticketIds || []).length;
+        if (bLinked !== aLinked) return bLinked - aLinked;
+        return new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0);
+      });
+      sorted.slice(1).forEach(s => idsToRemove.add(s.id));
+    });
+    if (idsToRemove.size === 0) return;
+    if (!window.confirm(`Remove ${idsToRemove.size} duplicate sale${idsToRemove.size !== 1 ? "s" : ""}? The best version of each will be kept.`)) return;
+    setSales(prev => prev.filter(s => !idsToRemove.has(s.id)));
+    notify?.(`Removed ${idsToRemove.size} duplicate${idsToRemove.size !== 1 ? "s" : ""}`);
+  };
 
   useEffect(() => {
     if (notifyFiredRef.current) return;
@@ -542,6 +595,34 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
         {kpis.map(k => <KpiCard key={k.label} {...k} />)}
       </div>
 
+      {/* ── DUPLICATES WARNING ── */}
+      {duplicateCount > 0 && (
+        <div style={{
+          background: "#ffffff", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10,
+          padding: "12px 18px", marginBottom: 12,
+          display: "flex", alignItems: "center", gap: 12,
+        }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(239,68,68,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>!</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT }}>
+              {duplicateCount} duplicate sale{duplicateCount !== 1 ? "s" : ""} detected
+            </div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, fontFamily: FONT }}>
+              Same order ID imported multiple times. Remove duplicates to fix revenue and profit figures.
+            </div>
+          </div>
+          <button onClick={removeDuplicates} style={{
+            background: "#ef4444", color: "white", border: "none", borderRadius: 7,
+            padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+            flexShrink: 0, transition: "all 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "#dc2626"}
+          onMouseLeave={e => e.currentTarget.style.background = "#ef4444"}>
+            Remove Duplicates
+          </button>
+        </div>
+      )}
+
       {/* ── ACTION REQUIRED SECTION ── */}
       {unmatchedSales.length > 0 && (
         <div style={{
@@ -592,6 +673,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
                 eventMap={eventMap}
                 onMatch={setMatchingSale}
                 onDelete={deleteUnmatchedSale}
+                duplicates={duplicates}
               />
             </div>
           )}
