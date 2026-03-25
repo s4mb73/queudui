@@ -191,86 +191,120 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
     unmatchedSales.forEach(s => {
       const name = saleEventName(s);
       const key = s.eventId || name;
-      if (!g[key]) g[key] = { eventName: name, sales: [] };
+      if (!g[key]) g[key] = { eventName: name, sales: [], totalRevenue: 0 };
       g[key].sales.push(s);
+      g[key].totalRevenue += s.salePrice || 0;
     });
     return Object.entries(g).sort((a, b) => b[1].sales.length - a[1].sales.length);
   }, [unmatchedSales, eventMap]);
 
   const toggleGroup = (key) => setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
 
-  const colStyle = { fontSize: 11, fontFamily: FONT, color: "#374151", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-  const hdrStyle = { fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT, whiteSpace: "nowrap" };
-
   return (
-    <div>
+    <div style={{ display: "grid", gap: 8 }}>
       {groups.map(([key, group]) => {
-        const isOpen = expandedGroups[key] !== false; // default open
+        const isOpen = expandedGroups[key] !== false;
+        const totalQty = group.sales.reduce((a, s) => a + (s.qtySold || 1), 0);
         return (
-          <div key={key}>
+          <div key={key} style={{ background: "#ffffff", border: "0.5px solid #e2e6ea", borderRadius: 10, overflow: "hidden" }}>
+            {/* Event group header */}
             <div
               onClick={() => toggleGroup(key)}
               style={{
-                display: "flex", alignItems: "center", gap: 8, padding: "8px 0",
-                cursor: "pointer", userSelect: "none", borderBottom: "0.5px solid #fde68a",
+                display: "flex", alignItems: "center", gap: 12, padding: "11px 16px",
+                cursor: "pointer", userSelect: "none",
+                background: isOpen ? "#fafafa" : "#ffffff",
+                borderBottom: isOpen ? "0.5px solid #f0f0f3" : "none",
+                transition: "background 0.1s",
               }}
+              onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = "#fafafa"; }}
+              onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "#ffffff"; }}
             >
-              <span style={{ fontSize: 11, color: "#a16207", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>▶</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", fontFamily: FONT, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {group.eventName}
-              </span>
-              <span style={{ fontSize: 11, color: "#a16207", fontFamily: FONT, flexShrink: 0 }}>
-                ({group.sales.length} sale{group.sales.length !== 1 ? "s" : ""})
-              </span>
-            </div>
-            {isOpen && (
-              <div style={{ paddingLeft: 6 }}>
-                {/* Column headers */}
-                <div style={{ display: "grid", gridTemplateColumns: "90px 40px 80px 70px 100px 60px 24px", gap: 6, padding: "4px 0", borderBottom: "0.5px solid #fde68a" }}>
-                  <span style={hdrStyle}>Platform</span>
-                  <span style={hdrStyle}>Qty</span>
-                  <span style={{ ...hdrStyle, textAlign: "right" }}>Revenue</span>
-                  <span style={hdrStyle}>Section</span>
-                  <span style={hdrStyle}>Order</span>
-                  <span />
-                  <span />
+              <div style={{ fontSize: 11, color: "#94a3b8", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>›</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {group.eventName}
                 </div>
-                {group.sales.map(sale => (
-                  <div key={sale.id} style={{ display: "grid", gridTemplateColumns: "90px 40px 80px 70px 100px 60px 24px", gap: 6, padding: "5px 0", alignItems: "center", borderBottom: "0.5px solid #fef3c7" }}>
-                    <span style={{ ...colStyle, fontFamily: "monospace", fontSize: 10, background: "rgba(245,158,11,0.12)", borderRadius: 3, padding: "1px 4px", display: "inline-block", maxWidth: 90 }}>
-                      {sale.sellingPlatform || "—"}
-                    </span>
-                    <span style={colStyle}>{sale.qtySold || 1}x</span>
-                    <span style={{ ...colStyle, fontWeight: 600, textAlign: "right" }}>{sale.salePrice > 0 ? fmt(sale.salePrice) : "—"}</span>
-                    <span style={colStyle}>{sale.section ? `Sec ${sale.section}` : "—"}</span>
-                    <span style={{ ...colStyle, fontFamily: "monospace", fontSize: 10 }}>{sale.orderId ? `#${sale.orderId}` : "—"}</span>
-                    <button
-                      onClick={() => onMatch(sale)}
-                      style={{
-                        background: "#f59e0b", color: "white", border: "none", borderRadius: 5,
-                        padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
-                        whiteSpace: "nowrap",
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#d97706"}
-                      onMouseLeave={e => e.currentTarget.style.background = "#f59e0b"}
-                    >
-                      Match
-                    </button>
-                    <button
-                      onClick={() => onDelete(sale.id)}
-                      style={{
-                        background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer",
-                        padding: "2px", borderRadius: 5, fontSize: 13, lineHeight: 1, transition: "color 0.15s",
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
-                      onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
               </div>
-            )}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{totalQty} ticket{totalQty !== 1 ? "s" : ""}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: FONT, fontVariantNumeric: "tabular-nums" }}>{fmt(group.totalRevenue)}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: "#b45309", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 10, padding: "2px 8px" }}>
+                  {group.sales.length} to match
+                </span>
+              </div>
+            </div>
+
+            {/* Individual sale rows */}
+            {isOpen && group.sales.map((sale, i) => (
+              <div key={sale.id} className="hover-row" style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "9px 16px 9px 36px",
+                borderBottom: i < group.sales.length - 1 ? "0.5px solid #f5f5f7" : "none",
+              }}>
+                {/* Platform badge */}
+                <div style={{
+                  fontSize: 10, fontWeight: 600, color: PLATFORM_COLORS[sale.sellingPlatform] || "#64748b",
+                  background: `${PLATFORM_COLORS[sale.sellingPlatform] || "#64748b"}12`,
+                  border: `1px solid ${PLATFORM_COLORS[sale.sellingPlatform] || "#64748b"}28`,
+                  borderRadius: 5, padding: "2px 8px", flexShrink: 0, fontFamily: FONT,
+                }}>
+                  {sale.sellingPlatform || "—"}
+                </div>
+
+                {/* Qty */}
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", fontFamily: FONT, width: 28, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                  {sale.qtySold || 1}x
+                </span>
+
+                {/* Revenue */}
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: FONT, width: 80, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                  {sale.salePrice > 0 ? fmt(sale.salePrice) : "—"}
+                </span>
+
+                {/* Section chip */}
+                {sale.section ? (
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "#1a3a6e", background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 5, padding: "2px 7px", flexShrink: 0 }}>
+                    Sec {sale.section}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, color: "#d1d5db", flexShrink: 0 }}>—</span>
+                )}
+
+                {/* Order ID */}
+                <span style={{ flex: 1, fontSize: 11, color: "#94a3b8", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {sale.orderId ? `#${sale.orderId}` : ""}
+                </span>
+
+                {/* Match button */}
+                <button
+                  onClick={() => onMatch(sale)}
+                  style={{
+                    background: "#f97316", color: "white", border: "none", borderRadius: 6,
+                    padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+                    flexShrink: 0, transition: "all 0.15s",
+                    boxShadow: "0 1px 2px rgba(249,115,22,0.2)",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#ea6c0a"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#f97316"; e.currentTarget.style.transform = "none"; }}
+                >
+                  Match
+                </button>
+
+                {/* Delete */}
+                <button
+                  onClick={() => onDelete(sale.id)}
+                  style={{
+                    background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer",
+                    padding: "2px 4px", borderRadius: 5, fontSize: 14, lineHeight: 1, transition: "color 0.15s",
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                  onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
           </div>
         );
       })}
