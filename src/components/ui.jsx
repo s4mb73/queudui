@@ -218,7 +218,7 @@ export function Sidebar({ view, setView, profile, isAdmin, onSignOut }) {
   };
 
   return (
-    <div style={{ width: 220, background: "#1a3a6e", display: "flex", flexDirection: "column", paddingBottom: 24, flexShrink: 0 }}>
+    <div style={{ width: 220, background: "#0f1729", display: "flex", flexDirection: "column", paddingBottom: 24, flexShrink: 0 }}>
       {/* Logo — no container box, just logo + wordmark */}
       <div style={{ padding: "22px 18px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
         <img src="/logo.png" alt="Queud" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} />

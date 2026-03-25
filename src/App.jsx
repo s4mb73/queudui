@@ -230,7 +230,7 @@ export default function App() {
 
   return (
     <div style={{
-      "--navy": "#1a3a6e", "--navy2": "#15306b",
+      "--navy": "#0f1729", "--navy2": "#0b1120",
       "--bg": "#f7f8fa", "--surface": "#ffffff",
       "--border": "#e2e6ea", "--border2": "#d1d9e0",
       "--text": "#0f172a", "--text2": "#374151",
