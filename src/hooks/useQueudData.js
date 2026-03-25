@@ -125,7 +125,7 @@ function saleToDb(s) {
 
 const POLL_INTERVAL_MS = 30_000;
 
-export function useQueudData() {
+export function useQueudData(user) {
   const [events, setEventsState]         = useState([]);
   const [tickets, setTicketsState]       = useState([]);
   const [sales, setSalesState]           = useState([]);
@@ -488,6 +488,22 @@ export function useQueudData() {
     });
   }, []);
 
+  // ── Activity logging ──────────────────────────────────────────────────────
+
+  const logActivity = useCallback((action, entityType, entityId, details = {}) => {
+    if (!user) return;
+    supabase.from('activity_log').insert({
+      user_id: user.id,
+      user_email: user.email || '',
+      action,
+      entity_type: entityType,
+      entity_id: entityId || '',
+      details,
+    }).then(({ error }) => {
+      if (error) console.warn('Activity log error:', error.message);
+    });
+  }, [user]);
+
   return {
     events,
     tickets,  setTickets,
@@ -496,6 +512,7 @@ export function useQueudData() {
     findOrCreateEvent,
     linkTicketsToSale,
     deleteSaleAndResetTickets,
+    logActivity,
     loading, error,
   };
 }

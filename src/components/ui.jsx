@@ -157,13 +157,31 @@ export function KpiCard({ label, value, color, sub, iconKey }) {
   );
 }
 
+// ── SVG icons for new nav items ──────────────────────────────────────────────
+Icons.tasks = (color = "currentColor") => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+    <rect x="2" y="2" width="12" height="12" rx="2" stroke={color} strokeWidth="1.3"/>
+    <path d="M5 8l2 2 4-4" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+Icons.team = (color = "currentColor") => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+    <circle cx="6" cy="5.5" r="2.5" stroke={color} strokeWidth="1.3"/>
+    <path d="M1.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke={color} strokeWidth="1.3" strokeLinecap="round"/>
+    <circle cx="11.5" cy="5" r="1.8" stroke={color} strokeWidth="1.1"/>
+    <path d="M11.5 9c1.8 0 3.2 1.1 3.2 2.8" stroke={color} strokeWidth="1.1" strokeLinecap="round"/>
+  </svg>
+);
+
 // ── Sidebar ──────────────────────────────────────────────────────────────────
-export function Sidebar({ view, setView }) {
+export function Sidebar({ view, setView, profile, isAdmin, onSignOut }) {
   const navItems = [
     { id: "dashboard", label: "Dashboard", iconFn: Icons.dashboard },
     { id: "inventory", label: "Inventory", iconFn: Icons.inventory },
     { id: "sales",     label: "Sales",     iconFn: Icons.sales },
-    { id: "settings",  label: "Settings",  iconFn: Icons.settings },
+    { id: "tasks",     label: "Tasks",     iconFn: Icons.tasks },
+    ...(isAdmin ? [{ id: "team", label: "Team", iconFn: Icons.team }] : []),
+    ...(isAdmin ? [{ id: "settings", label: "Settings", iconFn: Icons.settings }] : []),
   ];
 
   const NavItem = ({ id, label, iconFn }) => {
@@ -207,7 +225,42 @@ export function Sidebar({ view, setView }) {
         {navItems.map(item => <NavItem key={item.id} {...item} />)}
       </div>
 
-      <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 14, display: "flex", alignItems: "center", gap: 6, paddingLeft: 16 }}>
+      {/* User info + sign out */}
+      {profile && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 14, paddingLeft: 14, paddingRight: 14, paddingBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+              background: isAdmin ? "rgba(249,115,22,0.9)" : "rgba(255,255,255,0.15)",
+              color: "white", display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, fontWeight: 700,
+            }}>
+              {(profile.display_name || profile.email || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2)}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.85)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {profile.display_name || profile.email}
+              </div>
+              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", letterSpacing: "0.5px", textTransform: "uppercase", fontWeight: 700 }}>
+                {profile.role || "va"}
+              </div>
+            </div>
+          </div>
+          {onSignOut && (
+            <button onClick={onSignOut} style={{
+              width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.4)", fontSize: 10, fontWeight: 500, padding: "6px 0",
+              borderRadius: 6, cursor: "pointer", fontFamily: "var(--body)", transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = "rgba(255,255,255,0.7)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "rgba(255,255,255,0.4)"; }}>
+              Sign Out
+            </button>
+          )}
+        </div>
+      )}
+
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10, display: "flex", alignItems: "center", gap: 6, paddingLeft: 16, paddingBottom: 4 }}>
         <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
         <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: "0.3px" }}>Supabase connected</span>
       </div>

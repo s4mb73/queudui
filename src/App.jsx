@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQueudData } from "./hooks/useQueudData";
+import { useAuth } from "./hooks/useAuth";
 import { uid, fmt, today } from "./utils/format";
 import { supabase } from "./lib/supabase";
 import { Sidebar } from "./components/ui";
@@ -8,6 +9,9 @@ import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
 import Sales from "./pages/Sales";
 import Settings from "./pages/Settings/index";
+import Team from "./pages/Team";
+import Tasks from "./pages/Tasks";
+import Login from "./pages/Login";
 
 const BLANK_TICKET = {
   event: "", date: "", time: "", venue: "",
@@ -33,6 +37,7 @@ const BLANK_SALE = {
 };
 
 export default function App() {
+  const auth = useAuth();
   const {
     events,
     tickets, setTickets,
@@ -40,8 +45,9 @@ export default function App() {
     settings, setSettings,
     findOrCreateEvent, linkTicketsToSale,
     deleteSaleAndResetTickets,
+    logActivity,
     loading, error,
-  } = useQueudData();
+  } = useQueudData(auth.user);
 
   const [view, setView]                 = useState("dashboard");
   const [toast, setToast]               = useState(null);
@@ -81,18 +87,19 @@ export default function App() {
         if (t.id !== editingTicket.id) return t;
         const oldQty   = t.qty ?? 1;
         const oldAvail = t.qtyAvailable ?? oldQty;
-        // soldQty = how many of the original qty have already been sold/delivered
         const soldQty  = oldQty - oldAvail;
-        // new available = new total minus already sold, clamped to 0
         const newAvail = Math.max(0, qty - soldQty);
         return { ...tf, id: t.id, eventId, qty, cost, costPerTicket, qtyAvailable: newAvail };
       }));
+      logActivity("ticket_edited", "ticket", editingTicket.id, { event: tf.event, section: tf.section });
       notify("Ticket updated");
     } else {
+      const newId = uid();
       setTickets(prev => [...prev, {
-        ...tf, id: uid(), eventId, qty, cost, costPerTicket,
+        ...tf, id: newId, eventId, qty, cost, costPerTicket,
         qtyAvailable: qty, addedAt: new Date().toISOString(),
       }]);
+      logActivity("ticket_added", "ticket", newId, { event: tf.event, qty, cost });
       notify("Added to inventory");
     }
 
@@ -136,6 +143,10 @@ export default function App() {
     }]);
 
     if (linkTicketsToSale) await linkTicketsToSale(saleId, ids);
+    logActivity("sale_recorded", "sale", saleId, {
+      event: firstTicket.event, qtySold, salePrice,
+      platform: sf.sellingPlatform,
+    });
 
     setShowAddSale(false);
     setSf(BLANK_SALE);
@@ -180,10 +191,26 @@ export default function App() {
     setShowAddSale(true);
   };
 
+  // ── Auth loading ──────────────────────────────────────────────────────────
+  if (auth.loading) return (
+    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f7f8fa", fontFamily: "'DM Sans', sans-serif" }}>
+      <div style={{ textAlign: "center" }}>
+        <img src="/logo.png" alt="Queud" style={{ width: 40, height: 40, marginBottom: 16 }} />
+        <div style={{ fontSize: 13, color: "#64748b" }}>Loading...</div>
+      </div>
+    </div>
+  );
+
+  // ── Not logged in ─────────────────────────────────────────────────────────
+  if (!auth.user) return (
+    <Login signIn={auth.signIn} resetPassword={auth.resetPassword} />
+  );
+
+  // ── Data loading ──────────────────────────────────────────────────────────
   if (loading) return (
     <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f7f8fa", fontFamily: "'DM Sans', sans-serif" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 32, marginBottom: 16 }}>🎟️</div>
+        <img src="/logo.png" alt="Queud" style={{ width: 40, height: 40, marginBottom: 16 }} />
         <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Loading Queud...</div>
         <div style={{ fontSize: 13, color: "#64748b" }}>Connecting to database</div>
       </div>
@@ -193,7 +220,7 @@ export default function App() {
   if (error) return (
     <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#f7f8fa", fontFamily: "'DM Sans', sans-serif" }}>
       <div style={{ textAlign: "center", maxWidth: 400 }}>
-        <div style={{ fontSize: 32, marginBottom: 16 }}>⚠️</div>
+        <div style={{ fontSize: 32, marginBottom: 16 }}>!</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>Database Error</div>
         <div style={{ fontSize: 13, color: "#64748b" }}>{error}</div>
       </div>
@@ -236,7 +263,7 @@ export default function App() {
         select option { background: #ffffff; color: #0f172a; }
       `}</style>
 
-      <Sidebar view={view} setView={setView} />
+      <Sidebar view={view} setView={setView} profile={auth.profile} isAdmin={auth.isAdmin} onSignOut={auth.signOut} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* Top bar */}
@@ -244,9 +271,22 @@ export default function App() {
           <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase" }}>Queud</span>
           <span style={{ fontSize: 11, color: "#e2e6ea" }}>/</span>
           <span style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", textTransform: "capitalize", letterSpacing: "-0.1px" }}>{view}</span>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }} />
-            <span style={{ fontSize: 10, color: "#94a3b8" }}>Supabase</span>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }} />
+              <span style={{ fontSize: 10, color: "#94a3b8" }}>Supabase</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>
+              {auth.profile?.display_name || auth.user?.email}
+            </div>
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: "0.5px", textTransform: "uppercase",
+              padding: "3px 8px", borderRadius: 4,
+              background: auth.isAdmin ? "rgba(26,58,110,0.08)" : "rgba(249,115,22,0.08)",
+              color: auth.isAdmin ? "#1a3a6e" : "#f97316",
+            }}>
+              {auth.profile?.role || "va"}
+            </div>
           </div>
         </div>
 
@@ -271,6 +311,8 @@ export default function App() {
               setEditingTicket={setEditingTicket}
               setTf={setTf} blankTicket={BLANK_TICKET}
               openSale={openSale} notify={notify}
+              isAdmin={auth.isAdmin}
+              logActivity={logActivity}
             />
           )}
           {view === "sales" && (
@@ -278,14 +320,26 @@ export default function App() {
               tickets={tickets} sales={sales}
               setSales={setSales} updateSale={updateSale}
               setTickets={setTickets}
-              deleteSaleAndResetTickets={deleteSaleAndResetTickets}
+              deleteSaleAndResetTickets={auth.isAdmin ? deleteSaleAndResetTickets : null}
               linkTicketsToSale={linkTicketsToSale}
               events={events}
               setShowAddSale={setShowAddSale}
               notify={notify}
+              isAdmin={auth.isAdmin}
             />
           )}
-          {view === "settings" && (
+          {view === "tasks" && (
+            <Tasks
+              auth={auth}
+              events={events}
+              tickets={tickets}
+              notify={notify}
+            />
+          )}
+          {view === "team" && auth.isAdmin && (
+            <Team auth={auth} notify={notify} />
+          )}
+          {view === "settings" && auth.isAdmin && (
             <Settings
               settings={settings} setSettings={setSettings}
               tickets={tickets} setTickets={setTickets}
@@ -293,6 +347,13 @@ export default function App() {
               events={events} findOrCreateEvent={findOrCreateEvent}
               notify={notify} importParsed={importParsed}
             />
+          )}
+          {view === "settings" && !auth.isAdmin && (
+            <div style={{ textAlign: "center", padding: "60px 0", color: "#64748b" }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>!</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a", marginBottom: 6 }}>Admin Only</div>
+              <div style={{ fontSize: 13 }}>Settings are restricted to admin users.</div>
+            </div>
           )}
         </div>
       </div>
@@ -318,7 +379,7 @@ export default function App() {
 
       {toast && (
         <div style={{ position: "fixed", bottom: 24, right: 24, background: toast.type === "err" ? "#fef2f2" : "#ffffff", color: toast.type === "err" ? "#ef4444" : "#0f172a", padding: "12px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, zIndex: 999, animation: "toastIn 0.25s ease", border: toast.type === "err" ? "1px solid #fecaca" : "1px solid #e2e6ea", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}>
-          <span>{toast.type === "err" ? "⚠️" : "✓"}</span> {toast.msg}
+          <span>{toast.type === "err" ? "!" : "OK"}</span> {toast.msg}
         </div>
       )}
     </div>
