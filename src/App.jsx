@@ -354,8 +354,7 @@ export default function App() {
               settings={settings} setSettings={setSettings}
               tickets={tickets} setTickets={setTickets}
               sales={sales} setSales={setSales}
-              events={events} findOrCreateEvent={findOrCreateEvent}
-              notify={notify} importParsed={importParsed}
+              notify={notify}
             />
           )}
           {view === "settings" && !auth.isAdmin && (
