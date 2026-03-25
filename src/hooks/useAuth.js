@@ -25,11 +25,20 @@ export function useAuth() {
     let mounted = true;
 
     async function init() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user && mounted) {
-        setUser(session.user);
-        const p = await loadProfile(session.user.id);
-        if (mounted) setProfile(p);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) console.warn('Session error:', error.message);
+        if (session?.user && mounted) {
+          setUser(session.user);
+          try {
+            const p = await loadProfile(session.user.id);
+            if (mounted) setProfile(p);
+          } catch (e) {
+            console.warn('Profile load failed:', e.message);
+          }
+        }
+      } catch (e) {
+        console.warn('Auth init error:', e.message);
       }
       if (mounted) setLoading(false);
     }
@@ -41,8 +50,12 @@ export function useAuth() {
         if (!mounted) return;
         if (session?.user) {
           setUser(session.user);
-          const p = await loadProfile(session.user.id);
-          if (mounted) setProfile(p);
+          try {
+            const p = await loadProfile(session.user.id);
+            if (mounted) setProfile(p);
+          } catch (e) {
+            console.warn('Profile load failed:', e.message);
+          }
         } else {
           setUser(null);
           setProfile(null);
