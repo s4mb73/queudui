@@ -362,175 +362,229 @@ export function parseTicketmasterUSEmail(raw) {
 
 // ── Ticketmaster UK parser ────────────────────────────────────────────────────
 // Returns ARRAY of tickets — one per seat
+// Parses the well-known text/plain structure of TM UK confirmation emails:
+//   You got the tickets / ORDER # / EVENT / date / venue / qty / seats / total
 export function parseTicketmasterEmail(raw) {
-  const htmlPart = extractHtmlPart(raw);
-  const text = htmlPart ? stripHtml(htmlPart) : (isHtmlEmail(raw) ? stripHtml(raw) : raw);
-
-  // ── Event name ─────────────────────────────────────────────────────────────
-  const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
-  const subject = subjectMatch ? subjectMatch[1].trim() : '';
-
-  function cleanTMSubject(s) {
-    return s
-      .replace(/^you're in!\s*your\s+/i, '')
-      .replace(/^you're in!\s*/i, '')
-      .replace(/^your\s+/i, '')
-      .replace(/\s+tickets?\s+confirmation\s*$/i, '')
-      .replace(/\s+ticket\s+confirmation\s*$/i, '')
-      .replace(/\s+confirmation\s*$/i, '')
-      .trim()
-      .substring(0, 60);
+  // ── Extract text/plain part if available, else strip HTML ────────────────
+  let text = '';
+  const plainPartM = raw.match(
+    /Content-Type:\s*text\/plain[^\n]*\n(?:Content-Transfer-Encoding:[^\n]*\n)?\n([\s\S]+?)(?=\n--[^\n]|\n--[^\n]+--\s*$|$)/i
+  );
+  if (plainPartM) {
+    text = plainPartM[1]
+      .replace(/=C2=A3/g, '£')
+      .replace(/=\r?\n/g, '')
+      .replace(/=20\s*/g, ' ')
+      .replace(/&pound;/gi, '£')
+      .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#xA0;/g, ' ')
+      .trim();
+  }
+  if (!text) {
+    const htmlPart = extractHtmlPart(raw);
+    text = htmlPart ? stripHtml(htmlPart) : (isHtmlEmail(raw) ? stripHtml(raw) : raw);
   }
 
-  let event = subject ? cleanTMSubject(subject) : '';
+  // Normalise whitespace but preserve line breaks
+  text = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n');
+
+  const lines = text.split('\n').map(l => l.trim());
+
+  // ── Order ref ──────────────────────────────────────────────────────────────
+  const orderRef = extractOrderRef(text);
+
+  // ── Event name ─────────────────────────────────────────────────────────────
+  // Strategy 1: Find the event name line right after "You got the tickets" + ORDER #
+  let event = '';
+  const gotTicketsIdx = lines.findIndex(l => /you got the tickets/i.test(l));
+  const orderLineIdx = lines.findIndex(l => /ORDER\s*#/i.test(l));
+  if (gotTicketsIdx >= 0) {
+    // The event name is the first non-empty line after the ORDER # line,
+    // or after "You got the tickets" if ORDER # is on the same line
+    const searchStart = orderLineIdx > gotTicketsIdx ? orderLineIdx + 1 : gotTicketsIdx + 1;
+    for (let i = searchStart; i < Math.min(searchStart + 5, lines.length); i++) {
+      const l = lines[i];
+      if (!l) continue;
+      if (/^ORDER\s*#/i.test(l)) continue;
+      // Skip if it looks like a date line
+      if (/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i.test(l)) break;
+      event = l.substring(0, 80);
+      break;
+    }
+  }
+  // Strategy 2: Subject header fallback
   if (!event) {
-    const capsMatch = text.match(/\n([A-Z][A-Z0-9\s:,&'\-!.]{8,60})\n/);
-    if (capsMatch) event = capsMatch[1].trim().substring(0, 60);
+    const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
+    if (subjectMatch) {
+      event = subjectMatch[1].trim()
+        .replace(/^you're in!\s*your\s+/i, '')
+        .replace(/^you're in!\s*/i, '')
+        .replace(/^your\s+/i, '')
+        .replace(/\s+tickets?\s+confirmation\s*$/i, '')
+        .replace(/\s+ticket\s+confirmation\s*$/i, '')
+        .replace(/\s+confirmation\s*$/i, '')
+        .trim()
+        .substring(0, 80);
+    }
+  }
+  // Strategy 3: first all-caps line
+  if (!event) {
+    const capsMatch = text.match(/\n([A-Z][A-Z0-9\s:,&'\-!.]{8,80})\n/);
+    if (capsMatch) event = capsMatch[1].trim().substring(0, 80);
   }
 
   // ── Date & time ────────────────────────────────────────────────────────────
-  const ukDateTimeM = text.match(
-    /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})(?:[^a-z0-9]*(\d{1,2}:\d{2}\s*(?:am|pm)))?/i
-  );
-  const usDateM = text.match(
-    /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s*[·•\-]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/i
-  );
-  const timeOnlyM = text.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
-
+  // Look for "Fri 03 Apr 2026 - 7:00 pm" style TM UK date line
   let date = '', time = '';
-  if (ukDateTimeM) {
-    date = ukDateTimeM[1].trim();
-    time = ukDateTimeM[2]?.trim() || timeOnlyM?.[1]?.trim() || '';
-  } else if (usDateM) {
-    date = usDateM[1].trim();
-    time = timeOnlyM?.[1]?.trim() || '';
+  const tmukDateM = text.match(
+    /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+(\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4})\s*[-–·]\s*(\d{1,2}:\d{2}\s*(?:am|pm))/i
+  );
+  if (tmukDateM) {
+    date = tmukDateM[1].trim();
+    time = tmukDateM[2].trim();
+  } else {
+    // Broader date match without time on same line
+    const dateOnlyM = text.match(
+      /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+(\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4})/i
+    );
+    if (dateOnlyM) date = dateOnlyM[1].trim();
+    // US-style fallback
+    if (!date) {
+      const usDateM = text.match(
+        /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s*[·•\-]\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/i
+      );
+      if (usDateM) date = usDateM[1].trim();
+    }
+    // Standalone time
+    const timeOnlyM = text.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
+    if (timeOnlyM) time = timeOnlyM[1].trim();
   }
 
   // ── Venue ──────────────────────────────────────────────────────────────────
-  const venueKeywordM = text.match(
-    /([A-Z][a-zA-Z0-9\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater|Amphitheater|Amphitheatre|Field|Garden|Country Park|Academy|Pavilion|Ballroom|Forum|Coliseum|Hippodrome))[,\s]*/i
-  );
-  const venueCityM = !venueKeywordM && text.match(
-    /\n([A-Z][a-zA-Z\s]{3,40},\s*[A-Z][a-zA-Z\s]{2,30})\n/
-  );
-
+  // In TM UK emails, the venue line sits right after the date line.
+  // It typically looks like "O2 Academy Brixton, London" or "Herrington Country Park, Sunderland"
   let venue = '';
-  if (venueKeywordM) {
-    venue = venueKeywordM[0].replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 60);
-  } else if (venueCityM) {
-    venue = venueCityM[1].trim().substring(0, 60);
+  const dateLineIdx = lines.findIndex(l =>
+    /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i.test(l) &&
+    /\d{4}/.test(l)
+  );
+  if (dateLineIdx >= 0) {
+    // Venue is the next non-empty line after the date
+    for (let i = dateLineIdx + 1; i < Math.min(dateLineIdx + 3, lines.length); i++) {
+      const l = lines[i];
+      if (!l) continue;
+      // Skip if it looks like the qty line
+      if (/^\d+\s*[x×]\s/i.test(l)) break;
+      // Must contain a comma (venue, city) or a known venue keyword
+      if (/,/.test(l) || /(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater|Amphitheat|Field|Garden|Academy|Pavilion|Forum|Coliseum|Hippodrome|Apollo|Hydro|O2|SSE|OVO)/i.test(l)) {
+        venue = l.replace(/\s+/g, ' ').trim().substring(0, 80);
+        break;
+      }
+    }
+  }
+  // Fallback: keyword-based venue detection
+  if (!venue) {
+    const venueKeywordM = text.match(
+      /([A-Z][a-zA-Z0-9\s']+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater|Amphitheater|Amphitheatre|Field|Garden|Country Park|Academy|Pavilion|Ballroom|Forum|Coliseum|Hippodrome|Apollo|Hydro))[,\s]*/i
+    );
+    if (venueKeywordM) {
+      venue = venueKeywordM[0].replace(/\s*[—\-–]\s*.+$/, '').trim().substring(0, 80);
+    } else {
+      const venueCityM = text.match(/\n([A-Z][a-zA-Z\s]{3,40},\s*[A-Z][a-zA-Z\s]{2,30})\n/);
+      if (venueCityM) venue = venueCityM[1].trim().substring(0, 80);
+    }
   }
 
-  const orderRef = extractOrderRef(text);
   const category = detectCategory(text);
 
-  // ── Qty ────────────────────────────────────────────────────────────────────
+  // ── Qty from "Nx Mobile Ticket" ────────────────────────────────────────────
   const mobileMatch = text.match(/(\d+)\s*[x×]\s*(?:Mobile\s*)?Ticket/i);
   let qty = mobileMatch ? parseInt(mobileMatch[1]) : 1;
   if (isNaN(qty) || qty < 1) qty = 1;
+  if (qty > 100) qty = 100;
 
-  // ── Cost ───────────────────────────────────────────────────────────────────
-  // Prefer "Total (incl. fee)" over per-ticket face value
-  const totalInclFeeM = text.match(/Total\s*\(?incl\.?\s*fee\)?[:\s]*[£$€]([\d,]+\.?\d*)/i);
-  const perTicketM = text.match(/[£$€]([\d,]+\.?\d*)\s*[x×]\s*(\d+)/i)
-    || text.match(/(\d+)\s*[x×]\s*[£$€]([\d,]+\.?\d*)/i);
+  // ── Total cost — always prefer "Total (incl. fee)" ─────────────────────────
   let totalCost = 0;
-  let costPerTicket = 0;
+  const totalInclFeeM = text.match(
+    /Total\s*\(?incl\.?\s*fee[s]?\)?[^£€$\n]*[£€$]\s*([\d,]+\.?\d*)/i
+  );
   if (totalInclFeeM) {
-    totalCost = parseFloat((totalInclFeeM[1] || '').replace(/,/g, ''));
-    costPerTicket = qty > 0 ? parseFloat((totalCost / qty).toFixed(2)) : totalCost;
-  } else if (perTicketM) {
-    const g1 = parseFloat((perTicketM[1] || '').replace(/,/g, ''));
-    const g2 = parseFloat((perTicketM[2] || '').replace(/,/g, ''));
-    if (g1 > g2) {
-      costPerTicket = g1;
-      if (qty === 1) qty = Math.round(g2) || 1;
-    } else {
-      costPerTicket = g2;
-      if (qty === 1) qty = Math.round(g1) || 1;
-    }
-    totalCost = costPerTicket * qty;
+    totalCost = parseFloat(totalInclFeeM[1].replace(/,/g, ''));
   } else {
     totalCost = extractCost(text);
-    costPerTicket = qty > 0 ? parseFloat((totalCost / qty).toFixed(2)) : totalCost;
   }
 
-  // ── Seated structure check ─────────────────────────────────────────────────
-  const hasSeatStructure = /(?:Sec(?:tion)?|Block|BLK)\s*[\w\d]+|Row\s*[\w\d]+|\bSeat[s]?\s*\d+/i.test(text);
-
-  // ── Named ticket type — VIP, Hospitality, Premium, etc. ───────────────────
-  const namedTicketType = !hasSeatStructure ? extractTicketTypeName(text) : null;
-
-  if (namedTicketType) {
-    return Array.from({ length: qty }, (_, i) => ({
-      event, date, time, venue,
-      section: namedTicketType, row: '', seats: String(i + 1),
-      qty: 1, costPrice: costPerTicket, orderRef,
-      restrictions: '',
-      isStanding: false, category, confidence: 'high',
-    }));
-  }
-
-  // ── GA / Standing detection ────────────────────────────────────────────────
-  const gaLabelM = text.match(
-    /(General\s+Admission[^\n\r]{0,40}|(?:Unreserved|Rear|Front|Pitch|Floor|Festival)\s+Standing[^\n\r]{0,20}|Standing\s+Only[^\n\r]{0,20})/i
+  // ── View restriction detection ─────────────────────────────────────────────
+  const viewRestrictionM = text.match(
+    /((?:Severely\s+)?Restricted(?:\s+Side)?\s+View|Limited\s+View|Partial\s+View|Obstructed\s+View)/i
   );
-  const isStanding = !hasSeatStructure && (
-    !!gaLabelM || isStandingTicket(text.substring(0, 500))
-  );
+  const viewRestriction = viewRestrictionM
+    ? viewRestrictionM[1].replace(/\s+/g, ' ').trim().substring(0, 60)
+    : '';
 
-  if (isStanding) {
-    const sectionLabel = gaLabelM
-      ? gaLabelM[1].replace(/\s+/g, ' ').trim().substring(0, 60)
-      : 'General Admission';
-
-    return Array.from({ length: qty }, (_, i) => ({
-      event, date, time, venue,
-      section: sectionLabel, row: '', seats: String(i + 1),
-      qty: 1, costPrice: costPerTicket, orderRef,
-      restrictions: sectionLabel,
-      isStanding: true, category, confidence: 'high',
-    }));
-  }
-
-  // ── Seated — find all Sec/Row/Seat blocks ──────────────────────────────────
+  // ── Seated ticket detection ────────────────────────────────────────────────
+  // Look for ALL "Section XXX Row YYY Seat ZZZ" blocks in the text.
+  // TM UK uses: "Section BLK7 Row O Seat 35" (one per line, repeated per ticket)
   const tickets = [];
 
-  function pushSeats(sec, row, seatStr) {
+  function pushSeat(sec, rw, seatStr) {
     const rangeM = seatStr.trim().match(/^(\d+)\s*[-–]\s*(\d+)$/);
     if (rangeM) {
       const lo = Math.min(parseInt(rangeM[1]), parseInt(rangeM[2]));
       const hi = Math.max(parseInt(rangeM[1]), parseInt(rangeM[2]));
-      for (let s = lo; s <= hi; s++) tickets.push({ section: sec, row, seats: String(s) });
+      for (let s = lo; s <= hi; s++) tickets.push({ section: sec, row: rw, seats: String(s) });
     } else {
-      seatStr.split(/[,\s]+/).filter(s => /^\d+$/.test(s.trim()))
-        .forEach(s => tickets.push({ section: sec, row, seats: s.trim() }));
+      // Could be comma-separated seats or a single seat
+      const parts = seatStr.split(/[,\s]+/).filter(s => s.trim());
+      if (parts.length > 0) {
+        parts.forEach(s => tickets.push({ section: sec, row: rw, seats: s.trim() }));
+      } else {
+        tickets.push({ section: sec, row: rw, seats: seatStr.trim() });
+      }
     }
   }
 
+  // Pattern 1: Inline "Section BLK7 Row O Seat 35" (all on one line)
   let m;
-  const inlineWithRow    = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)[\s·•,]+Row\s*([\w\d]+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
-  const inlineWithoutRow = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
-
-  while ((m = inlineWithRow.exec(text)) !== null) pushSeats(m[1].trim(), m[2].trim(), m[3]);
-  if (tickets.length === 0) {
-    while ((m = inlineWithoutRow.exec(text)) !== null) pushSeats(m[1].trim(), '', m[2]);
-  }
-  if (tickets.length === 0) {
-    const blockPat = /(?:Sec(?:tion)?|Block|BLK)\s*:?\s*[\r\n\s]*([\w\d]+)(?:[\s\S]*?Row\s*:?\s*[\r\n\s]*([\w\d]+))?[\s\S]*?Seat[s]?\s*:?\s*[\r\n\s]*([\d\s,\-\u2013]+)/gi;
-    while ((m = blockPat.exec(text)) !== null) pushSeats(m[1].trim(), m[2]?.trim() ?? '', m[3]);
-  }
-  if (tickets.length === 0) {
-    const runTogether = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)\s*(?:Row\s*([\w\d]+)\s*)?Seat[s]?\s*([\d\-–]+)/gi;
-    while ((m = runTogether.exec(text)) !== null) pushSeats(m[1].trim(), m[2]?.trim() ?? '', m[3]);
+  const inlineFullP = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)[\s·•,]+Row\s*([\w\d]+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
+  while ((m = inlineFullP.exec(text)) !== null) {
+    pushSeat(m[1].trim(), m[2].trim(), m[3]);
   }
 
+  // Pattern 2: Section + Seat without Row
+  if (tickets.length === 0) {
+    const inlineNoRowP = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
+    while ((m = inlineNoRowP.exec(text)) !== null) {
+      pushSeat(m[1].trim(), '', m[2]);
+    }
+  }
+
+  // Pattern 3: Multi-line block format (Section on one line, Row on next, Seat on next)
+  if (tickets.length === 0) {
+    const blockP = /(?:Sec(?:tion)?|Block|BLK)\s*:?\s*[\r\n\s]*([\w\d]+)(?:[\s\S]*?Row\s*:?\s*[\r\n\s]*([\w\d]+))?[\s\S]*?Seat[s]?\s*:?\s*[\r\n\s]*([\d\s,\-\u2013]+)/gi;
+    while ((m = blockP.exec(text)) !== null) {
+      pushSeat(m[1].trim(), m[2]?.trim() ?? '', m[3]);
+    }
+  }
+
+  // Pattern 4: Compact run-together format
+  if (tickets.length === 0) {
+    const compactP = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)\s*(?:Row\s*([\w\d]+)\s*)?Seat[s]?\s*([\d\-–]+)/gi;
+    while ((m = compactP.exec(text)) !== null) {
+      pushSeat(m[1].trim(), m[2]?.trim() ?? '', m[3]);
+    }
+  }
+
+  // ── If we found seated tickets, return one per seat ────────────────────────
   if (tickets.length > 0) {
-    const costPerSeat = parseFloat((totalCost / tickets.length).toFixed(2));
-    const ticketLabelMatch = text.match(/((?:Severely\s+)?Restricted(?:\s+Side)?\s+View(?:\s+\w+){0,4}|Limited\s+View(?:\s+\w+){0,3}|Partial\s+View(?:\s+\w+){0,3}|Obstructed\s+View(?:\s+\w+){0,3})/i);
-    const viewRestriction = ticketLabelMatch
-      ? ticketLabelMatch[1].replace(/\s*(?:Aisle\s*)?Seated\s*Ticket\s*$/i, '').replace(/\s*Ticket\s*$/i, '').trim().substring(0, 60)
-      : '';
+    const costPerSeat = totalCost > 0
+      ? parseFloat((totalCost / tickets.length).toFixed(2))
+      : 0;
     return tickets.map(t => ({
       event, date, time, venue,
       section: t.section, row: t.row, seats: t.seats,
@@ -539,7 +593,76 @@ export function parseTicketmasterEmail(raw) {
     }));
   }
 
-  // Fallback
+  // ── Non-seated: VIP, Hospitality, Premium named types ──────────────────────
+  const namedTicketType = extractTicketTypeName(text);
+
+  if (namedTicketType) {
+    const costPerTicket = qty > 0
+      ? parseFloat((totalCost / qty).toFixed(2))
+      : totalCost;
+    return Array.from({ length: qty }, (_, i) => ({
+      event, date, time, venue,
+      section: namedTicketType, row: '', seats: String(i + 1),
+      qty: 1, costPrice: costPerTicket, orderRef,
+      restrictions: '', isStanding: false, category, confidence: 'high',
+    }));
+  }
+
+  // ── GA / Standing detection ────────────────────────────────────────────────
+  const gaLabelM = text.match(
+    /(General\s+Admission[^\n\r]{0,40}|(?:Unreserved|Rear|Front|Pitch|Floor|Festival)\s+Standing[^\n\r]{0,20}|Standing\s+Only[^\n\r]{0,20})/i
+  );
+  const standing = !!gaLabelM || isStandingTicket(text.substring(0, 800));
+
+  if (standing) {
+    const sectionLabel = gaLabelM
+      ? gaLabelM[1].replace(/\s+/g, ' ').trim().substring(0, 60)
+      : 'General Admission';
+    const costPerTicket = qty > 0
+      ? parseFloat((totalCost / qty).toFixed(2))
+      : totalCost;
+    return Array.from({ length: qty }, (_, i) => ({
+      event, date, time, venue,
+      section: sectionLabel, row: '', seats: String(i + 1),
+      qty: 1, costPrice: costPerTicket, orderRef,
+      restrictions: sectionLabel, isStanding: true, category, confidence: 'high',
+    }));
+  }
+
+  // ── Non-seated, non-standing: try to find ticket type from Order Summary ───
+  // Between "Order Summary" and "Payment Summary", look for ticket type names
+  const orderSummaryBlock = text.match(/Order\s+Summary([\s\S]{0,2000}?)Payment\s+Summary/i);
+  let fallbackSection = '';
+  if (orderSummaryBlock) {
+    // Find non-empty lines in Order Summary that aren't the qty line
+    const summaryLines = orderSummaryBlock[1].split('\n').map(l => l.trim()).filter(Boolean);
+    for (const sl of summaryLines) {
+      if (/^\d+\s*[x×]\s/i.test(sl)) continue;  // skip "2x Mobile Ticket"
+      if (/^Order/i.test(sl)) continue;
+      if (/^Payment/i.test(sl)) continue;
+      if (sl.length >= 3 && sl.length <= 80) {
+        fallbackSection = sl;
+        break;
+      }
+    }
+  }
+
+  if (fallbackSection) {
+    const costPerTicket = qty > 0
+      ? parseFloat((totalCost / qty).toFixed(2))
+      : totalCost;
+    return Array.from({ length: qty }, (_, i) => ({
+      event, date, time, venue,
+      section: fallbackSection, row: '', seats: String(i + 1),
+      qty: 1, costPrice: costPerTicket, orderRef,
+      restrictions: '', isStanding: false, category, confidence: 'high',
+    }));
+  }
+
+  // ── Final fallback ─────────────────────────────────────────────────────────
+  const costPerTicket = qty > 0
+    ? parseFloat((totalCost / qty).toFixed(2))
+    : totalCost;
   return [{
     event, date, time, venue,
     section: '', row: '', seats: '',
