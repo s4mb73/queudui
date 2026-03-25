@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 export function useAuth() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const loadingTimeout = useRef(null);
 
   // Load profile from profiles table
   const loadProfile = useCallback(async (userId) => {
@@ -20,51 +21,57 @@ export function useAuth() {
     return data;
   }, []);
 
-  // Initialize auth state
+  // Initialize auth state using onAuthStateChange only (recommended by Supabase)
   useEffect(() => {
     let mounted = true;
 
-    async function init() {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) console.warn('Session error:', error.message);
-        if (session?.user && mounted) {
-          setUser(session.user);
-          try {
-            const p = await loadProfile(session.user.id);
-            if (mounted) setProfile(p);
-          } catch (e) {
-            console.warn('Profile load failed:', e.message);
-          }
-        }
-      } catch (e) {
-        console.warn('Auth init error:', e.message);
+    // Safety timeout - if auth doesn't resolve in 5s, stop loading
+    loadingTimeout.current = setTimeout(() => {
+      if (mounted && loading) {
+        console.warn('Auth timeout - forcing load complete');
+        setLoading(false);
       }
-      if (mounted) setLoading(false);
-    }
-
-    init();
+    }, 5000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
+
         if (session?.user) {
           setUser(session.user);
-          try {
-            const p = await loadProfile(session.user.id);
-            if (mounted) setProfile(p);
-          } catch (e) {
-            console.warn('Profile load failed:', e.message);
-          }
+          // Use setTimeout to avoid Supabase deadlock on token refresh
+          setTimeout(async () => {
+            if (!mounted) return;
+            try {
+              const p = await loadProfile(session.user.id);
+              if (mounted) setProfile(p);
+            } catch (e) {
+              console.warn('Profile load failed:', e.message);
+            }
+            if (mounted) setLoading(false);
+          }, 0);
         } else {
           setUser(null);
           setProfile(null);
+          setLoading(false);
         }
       }
     );
 
+    // Also do an initial check in case onAuthStateChange doesn't fire
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      if (!session) {
+        setLoading(false);
+      }
+      // If session exists, onAuthStateChange will handle it
+    }).catch(() => {
+      if (mounted) setLoading(false);
+    });
+
     return () => {
       mounted = false;
+      if (loadingTimeout.current) clearTimeout(loadingTimeout.current);
       subscription.unsubscribe();
     };
   }, [loadProfile]);
