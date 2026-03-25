@@ -372,9 +372,11 @@ export function parseTicketmasterEmail(raw) {
 
   function cleanTMSubject(s) {
     return s
+      .replace(/^you're in!\s*your\s+/i, '')
       .replace(/^you're in!\s*/i, '')
       .replace(/^your\s+/i, '')
       .replace(/\s+tickets?\s+confirmation\s*$/i, '')
+      .replace(/\s+ticket\s+confirmation\s*$/i, '')
       .replace(/\s+confirmation\s*$/i, '')
       .trim()
       .substring(0, 60);
@@ -406,7 +408,7 @@ export function parseTicketmasterEmail(raw) {
 
   // ── Venue ──────────────────────────────────────────────────────────────────
   const venueKeywordM = text.match(
-    /([A-Z][a-zA-Z0-9\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater|Amphitheater|Field|Garden|Country Park))[,\s]*/i
+    /([A-Z][a-zA-Z0-9\s]+(?:Stadium|Arena|Ground|Park|Hall|Centre|Center|Dome|Theatre|Theater|Amphitheater|Amphitheatre|Field|Garden|Country Park|Academy|Pavilion|Ballroom|Forum|Coliseum|Hippodrome))[,\s]*/i
   );
   const venueCityM = !venueKeywordM && text.match(
     /\n([A-Z][a-zA-Z\s]{3,40},\s*[A-Z][a-zA-Z\s]{2,30})\n/
@@ -428,11 +430,16 @@ export function parseTicketmasterEmail(raw) {
   if (isNaN(qty) || qty < 1) qty = 1;
 
   // ── Cost ───────────────────────────────────────────────────────────────────
+  // Prefer "Total (incl. fee)" over per-ticket face value
+  const totalInclFeeM = text.match(/Total\s*\(?incl\.?\s*fee\)?[:\s]*[£$€]([\d,]+\.?\d*)/i);
   const perTicketM = text.match(/[£$€]([\d,]+\.?\d*)\s*[x×]\s*(\d+)/i)
     || text.match(/(\d+)\s*[x×]\s*[£$€]([\d,]+\.?\d*)/i);
   let totalCost = 0;
   let costPerTicket = 0;
-  if (perTicketM) {
+  if (totalInclFeeM) {
+    totalCost = parseFloat((totalInclFeeM[1] || '').replace(/,/g, ''));
+    costPerTicket = qty > 0 ? parseFloat((totalCost / qty).toFixed(2)) : totalCost;
+  } else if (perTicketM) {
     const g1 = parseFloat((perTicketM[1] || '').replace(/,/g, ''));
     const g2 = parseFloat((perTicketM[2] || '').replace(/,/g, ''));
     if (g1 > g2) {
@@ -449,7 +456,7 @@ export function parseTicketmasterEmail(raw) {
   }
 
   // ── Seated structure check ─────────────────────────────────────────────────
-  const hasSeatStructure = /(?:Sec(?:tion)?|Block)\s*\d+|Row\s*\d+|\bSeat[s]?\s*\d+/i.test(text);
+  const hasSeatStructure = /(?:Sec(?:tion)?|Block|BLK)\s*[\w\d]+|Row\s*[\w\d]+|\bSeat[s]?\s*\d+/i.test(text);
 
   // ── Named ticket type — VIP, Hospitality, Premium, etc. ───────────────────
   const namedTicketType = !hasSeatStructure ? extractTicketTypeName(text) : null;
@@ -502,19 +509,19 @@ export function parseTicketmasterEmail(raw) {
   }
 
   let m;
-  const inlineWithRow    = /Sec(?:tion)?\s*(\d+)[\s·•,]+Row\s*(\d+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
-  const inlineWithoutRow = /Sec(?:tion)?\s*(\d+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
+  const inlineWithRow    = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)[\s·•,]+Row\s*([\w\d]+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
+  const inlineWithoutRow = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)[\s·•,]+Seat[s]?\s*([\d\s,\-–]+)/gi;
 
   while ((m = inlineWithRow.exec(text)) !== null) pushSeats(m[1].trim(), m[2].trim(), m[3]);
   if (tickets.length === 0) {
     while ((m = inlineWithoutRow.exec(text)) !== null) pushSeats(m[1].trim(), '', m[2]);
   }
   if (tickets.length === 0) {
-    const blockPat = /(?:Sec(?:tion)?|Block)\s*:?\s*[\r\n\s]*(\d+)(?:[\s\S]*?Row\s*:?\s*[\r\n\s]*(\d+))?[\s\S]*?Seat[s]?\s*:?\s*[\r\n\s]*([\d\s,\-\u2013]+)/gi;
+    const blockPat = /(?:Sec(?:tion)?|Block|BLK)\s*:?\s*[\r\n\s]*([\w\d]+)(?:[\s\S]*?Row\s*:?\s*[\r\n\s]*([\w\d]+))?[\s\S]*?Seat[s]?\s*:?\s*[\r\n\s]*([\d\s,\-\u2013]+)/gi;
     while ((m = blockPat.exec(text)) !== null) pushSeats(m[1].trim(), m[2]?.trim() ?? '', m[3]);
   }
   if (tickets.length === 0) {
-    const runTogether = /Sec(?:tion)?\s*(\d+)\s*(?:Row\s*(\d+)\s*)?Seat[s]?\s*([\d\-–]+)/gi;
+    const runTogether = /(?:Sec(?:tion)?|Block|BLK)\s*([\w\d]+)\s*(?:Row\s*([\w\d]+)\s*)?Seat[s]?\s*([\d\-–]+)/gi;
     while ((m = runTogether.exec(text)) !== null) pushSeats(m[1].trim(), m[2]?.trim() ?? '', m[3]);
   }
 
