@@ -419,11 +419,6 @@ export default function Emails({ settings, setSettings, tickets, setTickets, sal
       </div>
 
       <div style={{ display: "grid", gap: 10, maxWidth: 760 }}>
-        <SalesPlatforms
-          settings={settings} setSettings={setSettings}
-          gmailAccounts={gmailAccounts} inputStyle={inputStyle}
-          notify={notify}
-        />
         <EmailScraper
           settings={settings}
           gmailAccounts={gmailAccounts}
@@ -440,6 +435,11 @@ export default function Emails({ settings, setSettings, tickets, setTickets, sal
           importAll={importAll}
           inputStyle={inputStyle} notify={notify} SITES={SITES}
           isStandingTicket={isStandingTicket}
+        />
+        <SalesPlatforms
+          settings={settings} setSettings={setSettings}
+          gmailAccounts={gmailAccounts} inputStyle={inputStyle}
+          notify={notify}
         />
         <ManualEmailPaste
           emailText={emailText} setEmailText={setEmailText}
