@@ -36,7 +36,7 @@ const COL = {
 const ROW = { display: "flex", alignItems: "center", gap: 12, padding: "0 18px" };
 
 // ── Sale detail panel ─────────────────────────────────────────────────────────
-function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale, onClose }) {
+function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale, onClose, onUnmatch }) {
   const matchedTickets = (sale.ticketIds || [])
     .map(id => tickets.find(t => t.id === id))
     .filter(Boolean);
@@ -153,79 +153,132 @@ function SaleDetailPanel({ sale, tickets, eventMap, updateSaleStatus, updateSale
               <div style={{ fontSize: 12, color: "#374151", fontFamily: FONT }}>{sale.notes}</div>
             </div>
           )}
+
+          {onUnmatch && sale.ticketIds && sale.ticketIds.length > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e6ea" }}>
+              <button
+                onClick={() => { if (window.confirm("Unmatch this sale? Linked tickets will be reset to Unsold.")) onUnmatch(sale.id); }}
+                style={{
+                  background: "rgba(245,158,11,0.1)", color: "#b45309",
+                  border: "1px solid #fcd34d", borderRadius: 7,
+                  padding: "7px 14px", fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", fontFamily: FONT,
+                  display: "flex", alignItems: "center", gap: 5,
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.18)"}
+                onMouseLeave={e => e.currentTarget.style.background = "rgba(245,158,11,0.1)"}
+              >
+                Unmatch Sale
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ── Unmatched Sale Card ───────────────────────────────────────────────────────
-function UnmatchedSaleCard({ sale, tickets, eventMap, onMatch, onDelete }) {
+// ── Unmatched Sales Table (compact, grouped by event) ─────────────────────────
+function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelete }) {
+  const [expandedGroups, setExpandedGroups] = useState({});
+
   function saleEventName(s) { return eventMap[s.eventId]?.name || s.eventName || "Unknown Event"; }
 
+  // Group by event
+  const groups = useMemo(() => {
+    const g = {};
+    unmatchedSales.forEach(s => {
+      const name = saleEventName(s);
+      const key = s.eventId || name;
+      if (!g[key]) g[key] = { eventName: name, sales: [] };
+      g[key].sales.push(s);
+    });
+    return Object.entries(g).sort((a, b) => b[1].sales.length - a[1].sales.length);
+  }, [unmatchedSales, eventMap]);
+
+  const toggleGroup = (key) => setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const colStyle = { fontSize: 11, fontFamily: FONT, color: "#374151", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+  const hdrStyle = { fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#9ca3af", fontFamily: FONT, whiteSpace: "nowrap" };
+
   return (
-    <div style={{
-      background: "#fffbeb",
-      border: "1px solid #fcd34d",
-      borderLeft: "4px solid #f59e0b",
-      borderRadius: 10,
-      padding: "14px 16px",
-      display: "flex",
-      alignItems: "center",
-      gap: 14,
-    }}>
-      <div style={{ fontSize: 22, flexShrink: 0 }}>⚠️</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {saleEventName(sale)}
-        </div>
-        <div style={{ fontSize: 11, color: "#a16207", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontFamily: "monospace", background: "rgba(245,158,11,0.15)", borderRadius: 4, padding: "1px 5px" }}>{sale.sellingPlatform}</span>
-          {sale.qtySold && <span>{sale.qtySold}× tickets</span>}
-          {sale.salePrice > 0 && <span style={{ fontWeight: 600 }}>{fmt(sale.salePrice)}</span>}
-          {sale.date && <span>{sale.date}</span>}
-          {sale.section && <span>Sec {sale.section}</span>}
-          {sale.orderId && <span>Order #{sale.orderId}</span>}
-        </div>
-      </div>
-      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-        <div style={{ fontSize: 11, color: "#b45309", background: "rgba(245,158,11,0.1)", border: "1px solid #fcd34d", borderRadius: 6, padding: "3px 8px", fontWeight: 600 }}>
-          No inventory linked
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            onClick={() => onDelete(sale.id)}
-            style={{
-              background: "rgba(239,68,68,0.08)", color: "#ef4444",
-              border: "1px solid rgba(239,68,68,0.2)", borderRadius: 7,
-              padding: "6px 10px", fontSize: 11, fontWeight: 600,
-              cursor: "pointer", fontFamily: FONT,
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.14)"}
-            onMouseLeave={e => e.currentTarget.style.background = "rgba(239,68,68,0.08)"}>
-            🗑 Delete
-          </button>
-          <button
-            onClick={() => onMatch(sale)}
-            style={{
-              background: "#f59e0b", color: "white",
-              border: "none", borderRadius: 7,
-              padding: "7px 14px", fontSize: 12, fontWeight: 700,
-              cursor: "pointer", fontFamily: FONT,
-              display: "flex", alignItems: "center", gap: 5,
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = "#d97706"}
-            onMouseLeave={e => e.currentTarget.style.background = "#f59e0b"}>
-            🔗 Match to Inventory
-          </button>
-        </div>
-      </div>
+    <div>
+      {groups.map(([key, group]) => {
+        const isOpen = expandedGroups[key] !== false; // default open
+        return (
+          <div key={key}>
+            <div
+              onClick={() => toggleGroup(key)}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "8px 0",
+                cursor: "pointer", userSelect: "none", borderBottom: "0.5px solid #fde68a",
+              }}
+            >
+              <span style={{ fontSize: 11, color: "#a16207", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>▶</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", fontFamily: FONT, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {group.eventName}
+              </span>
+              <span style={{ fontSize: 11, color: "#a16207", fontFamily: FONT, flexShrink: 0 }}>
+                ({group.sales.length} sale{group.sales.length !== 1 ? "s" : ""})
+              </span>
+            </div>
+            {isOpen && (
+              <div style={{ paddingLeft: 6 }}>
+                {/* Column headers */}
+                <div style={{ display: "grid", gridTemplateColumns: "90px 40px 80px 70px 100px 60px 24px", gap: 6, padding: "4px 0", borderBottom: "0.5px solid #fde68a" }}>
+                  <span style={hdrStyle}>Platform</span>
+                  <span style={hdrStyle}>Qty</span>
+                  <span style={{ ...hdrStyle, textAlign: "right" }}>Revenue</span>
+                  <span style={hdrStyle}>Section</span>
+                  <span style={hdrStyle}>Order</span>
+                  <span />
+                  <span />
+                </div>
+                {group.sales.map(sale => (
+                  <div key={sale.id} style={{ display: "grid", gridTemplateColumns: "90px 40px 80px 70px 100px 60px 24px", gap: 6, padding: "5px 0", alignItems: "center", borderBottom: "0.5px solid #fef3c7" }}>
+                    <span style={{ ...colStyle, fontFamily: "monospace", fontSize: 10, background: "rgba(245,158,11,0.12)", borderRadius: 3, padding: "1px 4px", display: "inline-block", maxWidth: 90 }}>
+                      {sale.sellingPlatform || "—"}
+                    </span>
+                    <span style={colStyle}>{sale.qtySold || 1}x</span>
+                    <span style={{ ...colStyle, fontWeight: 600, textAlign: "right" }}>{sale.salePrice > 0 ? fmt(sale.salePrice) : "—"}</span>
+                    <span style={colStyle}>{sale.section ? `Sec ${sale.section}` : "—"}</span>
+                    <span style={{ ...colStyle, fontFamily: "monospace", fontSize: 10 }}>{sale.orderId ? `#${sale.orderId}` : "—"}</span>
+                    <button
+                      onClick={() => onMatch(sale)}
+                      style={{
+                        background: "#f59e0b", color: "white", border: "none", borderRadius: 5,
+                        padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                        whiteSpace: "nowrap",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#d97706"}
+                      onMouseLeave={e => e.currentTarget.style.background = "#f59e0b"}
+                    >
+                      Match
+                    </button>
+                    <button
+                      onClick={() => onDelete(sale.id)}
+                      style={{
+                        background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer",
+                        padding: "2px", borderRadius: 5, fontSize: 13, lineHeight: 1, transition: "color 0.15s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                      onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-export default function Sales({ tickets, sales, setSales, updateSale, setTickets, deleteSaleAndResetTickets, linkTicketsToSale, events, setShowAddSale, notify }) {
+export default function Sales({ tickets, sales, setSales, updateSale, setTickets, deleteSaleAndResetTickets, linkTicketsToSale, events, setShowAddSale, notify, isAdmin }) {
   const [expandedEvents, setExpandedEvents]   = useState({});
   const [expandedSales, setExpandedSales]     = useState({});
   const [filterStatus, setFilterStatus]       = useState("All");
@@ -279,6 +332,62 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
     if (typeof window !== "undefined")
       window.dispatchEvent(new CustomEvent("queud:createAndLink", { detail: { saleId, newTicket } }));
     notify?.("✅ Ticket created and linked");
+  };
+
+  const unmatchSale = (saleId) => {
+    const sale = sales.find(s => s.id === saleId);
+    if (!sale) return;
+    const ticketIdsToReset = sale.ticketIds || [];
+    // Reset tickets to Unsold
+    if (ticketIdsToReset.length > 0) {
+      setTickets(prev => prev.map(t =>
+        ticketIdsToReset.includes(t.id)
+          ? { ...t, status: 'Unsold', qtyAvailable: t.qty ?? 1 }
+          : t
+      ));
+    }
+    // Clear ticketIds on the sale (but keep the sale)
+    setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds: [] } : s));
+    // Close the expanded panel
+    setExpandedSales(prev => ({ ...prev, [saleId]: false }));
+    notify?.("Sale unmatched · tickets reset to Unsold");
+  };
+
+  const exportSalesCsv = () => {
+    const headers = ["Event Name","Date","Venue","Platform","Order ID","Qty","Revenue","Cost","Profit","Status","Section","Row","Seats","Customer Email","Customer Phone"];
+    const rows = sales.map(s => {
+      const ev = eventMap[s.eventId] || {};
+      const matchedTkts = (s.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
+      const costTotal = matchedTkts.reduce((a, t) => a + (t.cost || 0), 0);
+      const profit = (s.salePrice || 0) - costTotal;
+      const firstTkt = matchedTkts[0];
+      return [
+        ev.name || s.eventName || "",
+        ev.date || s.date || "",
+        ev.venue || "",
+        s.sellingPlatform || "",
+        s.orderId || "",
+        String(s.qtySold || 0),
+        fmt(s.salePrice || 0),
+        costTotal > 0 ? fmt(costTotal) : "",
+        costTotal > 0 ? fmt(profit) : "",
+        s.saleStatus || "Awaiting Delivery",
+        s.section || firstTkt?.section || "",
+        s.row || firstTkt?.row || "",
+        s.seats || matchedTkts.map(t => t.seats).filter(Boolean).join(", ") || "",
+        s.customerEmail || "",
+        s.customerPhone || "",
+      ];
+    });
+    const csvContent = [headers, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sales_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    notify?.(`Exported ${sales.length} sales to CSV`);
   };
 
   // ── KPIs — only from matched sales ────────────────────────────────────────
@@ -386,6 +495,9 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
                 🗑 Delete {selected.size}
               </button>
             )}
+            <button onClick={exportSalesCsv} style={{ background: "rgba(26,58,110,0.08)", color: "#1a3a6e", border: "1px solid rgba(26,58,110,0.2)", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+              Export CSV
+            </button>
             <button className="action-btn" onClick={() => setShowAddSale(true)}>+ Record Sale</button>
           </div>
         }
@@ -436,21 +548,17 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
           </div>
 
           {!actionSectionCollapsed && (
-            <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-              <p style={{ fontSize: 12, color: "#6b7280", margin: 0, fontFamily: FONT }}>
-                These sales were imported or recorded but not yet linked to inventory tickets. 
+            <div style={{ padding: "14px 18px" }}>
+              <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 10px", fontFamily: FONT }}>
+                These sales were imported or recorded but not yet linked to inventory tickets.
                 Cost and profit figures will be inaccurate until matched.
               </p>
-              {unmatchedSales.map(sale => (
-                <UnmatchedSaleCard
-                  key={sale.id}
-                  sale={sale}
-                  tickets={tickets}
-                  eventMap={eventMap}
-                  onMatch={setMatchingSale}
-                  onDelete={deleteUnmatchedSale}
-                />
-              ))}
+              <UnmatchedSalesTable
+                sales={unmatchedSales}
+                eventMap={eventMap}
+                onMatch={setMatchingSale}
+                onDelete={deleteUnmatchedSale}
+              />
             </div>
           )}
         </div>
@@ -699,6 +807,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
                         updateSaleStatus={updateSaleStatus}
                         updateSale={updateSale}
                         onClose={() => setExpandedSales(prev => ({ ...prev, [s.id]: false }))}
+                        onUnmatch={unmatchSale}
                       />
                     )}
                   </div>
