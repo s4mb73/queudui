@@ -158,6 +158,12 @@ export function KpiCard({ label, value, color, sub, iconKey }) {
 }
 
 // ── SVG icons for new nav items ──────────────────────────────────────────────
+Icons.emails = (color = "currentColor") => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+    <rect x="1.5" y="3" width="13" height="10" rx="1.5" stroke={color} strokeWidth="1.3"/>
+    <path d="M1.5 5l6.5 4 6.5-4" stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
 Icons.tasks = (color = "currentColor") => (
   <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
     <rect x="2" y="2" width="12" height="12" rx="2" stroke={color} strokeWidth="1.3"/>
@@ -179,6 +185,7 @@ export function Sidebar({ view, setView, profile, isAdmin, onSignOut }) {
     { id: "dashboard", label: "Dashboard", iconFn: Icons.dashboard },
     { id: "inventory", label: "Inventory", iconFn: Icons.inventory },
     { id: "sales",     label: "Sales",     iconFn: Icons.sales },
+    { id: "emails",    label: "Emails",    iconFn: Icons.emails },
     { id: "tasks",     label: "Tasks",     iconFn: Icons.tasks },
     ...(isAdmin ? [{ id: "team", label: "Team", iconFn: Icons.team }] : []),
     ...(isAdmin ? [{ id: "settings", label: "Settings", iconFn: Icons.settings }] : []),
