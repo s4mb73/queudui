@@ -11,6 +11,7 @@ import Sales from "./pages/Sales";
 import Settings from "./pages/Settings/index";
 import Team from "./pages/Team";
 import Tasks from "./pages/Tasks";
+import Emails from "./pages/Emails";
 import Login from "./pages/Login";
 
 const BLANK_TICKET = {
@@ -326,6 +327,15 @@ export default function App() {
               setShowAddSale={setShowAddSale}
               notify={notify}
               isAdmin={auth.isAdmin}
+            />
+          )}
+          {view === "emails" && (
+            <Emails
+              settings={settings} setSettings={setSettings}
+              tickets={tickets} setTickets={setTickets}
+              sales={sales} setSales={setSales}
+              events={events} findOrCreateEvent={findOrCreateEvent}
+              notify={notify} importParsed={importParsed}
             />
           )}
           {view === "tasks" && (
