@@ -1,12 +1,12 @@
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
 // fmt — formats a number as GBP (£) — primary currency for this app
-export const fmt = (v) => `£${parseFloat(v || 0).toFixed(2)}`;
+export const fmt = (v) => `£${parseFloat(v || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const fmtCurrency = (amount, currency) => {
   const symbols = { GBP: '£', USD: '$', EUR: '€', CAD: 'CA$', AUD: 'A$' };
   const sym = symbols[currency] || currency + ' ';
-  return `${sym}${parseFloat(amount || 0).toFixed(2)}`;
+  return `${sym}${parseFloat(amount || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 export const fmtPct = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
