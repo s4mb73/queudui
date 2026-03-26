@@ -95,13 +95,37 @@ export default function App() {
       logActivity("ticket_edited", "ticket", editingTicket.id, { event: tf.event, section: tf.section });
       notify("Ticket updated");
     } else {
-      const newId = uid();
-      setTickets(prev => [...prev, {
-        ...tf, id: newId, eventId, qty, cost, costPerTicket,
-        qtyAvailable: qty, addedAt: new Date().toISOString(),
-      }]);
-      logActivity("ticket_added", "ticket", newId, { event: tf.event, qty, cost });
-      notify("Added to inventory");
+      // Check if seats field contains a range like "11-12" or "5-8"
+      const seatStr = (tf.seats || "").trim();
+      const rangeMatch = seatStr.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+
+      if (rangeMatch && !tf.isStanding) {
+        const lo = Math.min(parseInt(rangeMatch[1]), parseInt(rangeMatch[2]));
+        const hi = Math.max(parseInt(rangeMatch[1]), parseInt(rangeMatch[2]));
+        const seatCount = hi - lo + 1;
+        const perSeatCost = parseFloat((cost / seatCount).toFixed(2));
+        const newTickets = [];
+        for (let s = lo; s <= hi; s++) {
+          newTickets.push({
+            ...tf, id: uid(), eventId,
+            qty: 1, qtyAvailable: 1,
+            seats: String(s),
+            cost: perSeatCost, costPerTicket: perSeatCost,
+            addedAt: new Date().toISOString(),
+          });
+        }
+        setTickets(prev => [...prev, ...newTickets]);
+        logActivity("ticket_added", "ticket", "", { event: tf.event, qty: seatCount, cost });
+        notify(`Added ${seatCount} tickets (Seats ${lo}-${hi}) to inventory`);
+      } else {
+        const newId = uid();
+        setTickets(prev => [...prev, {
+          ...tf, id: newId, eventId, qty, cost, costPerTicket,
+          qtyAvailable: qty, addedAt: new Date().toISOString(),
+        }]);
+        logActivity("ticket_added", "ticket", newId, { event: tf.event, qty, cost });
+        notify("Added to inventory");
+      }
     }
 
     setShowAddTicket(false);
