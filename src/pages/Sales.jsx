@@ -948,7 +948,7 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
                         )}
                       </div>
 
-                      <div style={{ width: COL.date,     flexShrink: 0, fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{s.date || "—"}</div>
+                      <div style={{ width: COL.date,     flexShrink: 0, fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{eventMap[s.eventId]?.date || s.date || "—"}</div>
                       <div style={{ width: COL.platform, flexShrink: 0 }}><PlatformBadge platform={s.sellingPlatform} /></div>
                       <div style={{ width: COL.qty,      flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", fontVariantNumeric: "tabular-nums", fontFamily: FONT }}>{s.qtySold}×</div>
                       <div style={{ width: COL.revenue,  flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#111827", fontVariantNumeric: "tabular-nums", fontFamily: FONT, textAlign: "right" }}>{fmt(s.salePrice)}</div>
