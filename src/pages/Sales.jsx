@@ -191,8 +191,11 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
     const g = {};
     unmatchedSales.forEach(s => {
       const name = saleEventName(s);
-      const key = s.eventId || name;
-      if (!g[key]) g[key] = { eventName: name, eventId: s.eventId, sales: [], totalRevenue: 0 };
+      const ev = eventMap[s.eventId] || {};
+      const eventDate = ev.date || "";
+      // Group by eventId + date so same event on different dates are separate
+      const key = (s.eventId || name) + "||" + eventDate;
+      if (!g[key]) g[key] = { eventName: name, eventId: s.eventId, eventDate, venue: ev.venue || "", sales: [], totalRevenue: 0 };
       g[key].sales.push(s);
       g[key].totalRevenue += s.salePrice || 0;
     });
@@ -226,11 +229,11 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {group.eventName}
                 </div>
-                {(eventMap[group.eventId]?.date || eventMap[group.eventId]?.venue) && (
+                {(group.eventDate || group.venue) && (
                   <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2, fontFamily: FONT, display: "flex", gap: 6, alignItems: "center" }}>
-                    {eventMap[group.eventId]?.date && <span>{eventMap[group.eventId].date}</span>}
-                    {eventMap[group.eventId]?.date && eventMap[group.eventId]?.venue && <span style={{ color: "#d1d5db" }}>·</span>}
-                    {eventMap[group.eventId]?.venue && <span>{eventMap[group.eventId].venue}</span>}
+                    {group.eventDate && <span>{group.eventDate}</span>}
+                    {group.eventDate && group.venue && <span style={{ color: "#d1d5db" }}>·</span>}
+                    {group.venue && <span>{group.venue}</span>}
                   </div>
                 )}
               </div>
@@ -278,9 +281,9 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
                   <span style={{ fontSize: 11, color: "#d1d5db", flexShrink: 0 }}>—</span>
                 )}
 
-                {/* Sale date */}
-                {sale.date && (
-                  <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: FONT, flexShrink: 0 }}>{sale.date}</span>
+                {/* Event date (not sale/import date) */}
+                {(eventMap[sale.eventId]?.date || sale.date) && (
+                  <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: FONT, flexShrink: 0 }}>{eventMap[sale.eventId]?.date || sale.date}</span>
                 )}
 
                 {/* Order ID + duplicate badge */}
