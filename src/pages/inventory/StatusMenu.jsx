@@ -1,9 +1,22 @@
-import { forwardRef } from "react";
+import { forwardRef, useRef, useState, useEffect } from "react";
 import { STATUSES, STATUS_STYLES } from "./helpers";
 
 const StatusMenu = forwardRef(function StatusMenu({ ticket, onUpdateStatus }, ref) {
+  const menuRef = useRef(null);
+  const [openUp, setOpenUp] = useState(false);
+
+  useEffect(() => {
+    if (menuRef.current) {
+      const rect = menuRef.current.getBoundingClientRect();
+      if (rect.bottom > window.innerHeight - 20) {
+        setOpenUp(true);
+      }
+    }
+  }, []);
+
   return (
-    <div ref={ref} style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "white", border: "0.5px solid #e8e8ec", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, minWidth: 140, overflow: "hidden" }}>
+    <div ref={el => { menuRef.current = el; if (typeof ref === 'function') ref(el); else if (ref) ref.current = el; }}
+      style={{ position: "absolute", [openUp ? "bottom" : "top"]: "100%", right: 0, [openUp ? "marginBottom" : "marginTop"]: 4, background: "white", border: "0.5px solid #e8e8ec", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, minWidth: 140, overflow: "hidden" }}>
       {STATUSES.map(st => (
         <div key={st} onClick={e => onUpdateStatus(ticket.id, st, e)}
           style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", background: ticket.status === st ? "#f9f9fb" : "transparent", fontSize: 12, fontWeight: ticket.status === st ? 600 : 400, color: STATUS_STYLES[st].text }}
