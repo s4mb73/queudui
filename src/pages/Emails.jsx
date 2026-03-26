@@ -15,6 +15,7 @@ const SITES = [
   { value: "ticketmaster_uk", label: "Ticketmaster UK",  subject: "You got the tickets" },
   { value: "ticketmaster_us", label: "Ticketmaster USA", subject: "You Got Tickets To" },
   { value: "liverpool",       label: "Liverpool FC",     subject: "Liverpool FC Booking Confirmation" },
+  { value: "weezevent",       label: "Weezevent",         subject: "Your order for" },
   { value: "generic",         label: "Other / Generic",  subject: "" },
 ];
 
