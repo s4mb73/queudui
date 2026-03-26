@@ -64,16 +64,26 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
       .sort((a, b) => b._score - a._score);
   }, [tickets, sale]);
 
+  const requiredQty = sale.qtySold || 1;
+
   const toggle = (id) => {
     setSelected(prev => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) {
+        n.delete(id);
+      } else {
+        // Don't allow selecting more than required qty
+        if (n.size >= requiredQty) return prev;
+        n.add(id);
+      }
       return n;
     });
   };
 
+  const exactMatch = selected.size === requiredQty;
+
   const handleConfirm = () => {
-    if (selected.size === 0) return;
+    if (!exactMatch) return;
     onLink(sale.id, [...selected]);
   };
 
@@ -191,8 +201,16 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                 </div>
               ) : (
                 <>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontFamily: FONT }}>
-                    Select the ticket(s) that were sold. Best matches shown first.
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontFamily: FONT, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>Select exactly <strong style={{ color: "#111827" }}>{requiredQty} ticket{requiredQty !== 1 ? "s" : ""}</strong> to match this sale. Best matches shown first.</span>
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, fontFamily: FONT, padding: "3px 10px", borderRadius: 10,
+                      background: exactMatch ? "rgba(5,150,105,0.08)" : selected.size === 0 ? "#f1f5f9" : "rgba(239,68,68,0.08)",
+                      color: exactMatch ? "#059669" : selected.size === 0 ? "#94a3b8" : "#ef4444",
+                      border: `1px solid ${exactMatch ? "rgba(5,150,105,0.2)" : selected.size === 0 ? "#e2e6ea" : "rgba(239,68,68,0.2)"}`,
+                    }}>
+                      {selected.size} / {requiredQty}
+                    </span>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {candidates.map(t => {
@@ -304,9 +322,9 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
             Cancel
           </button>
           {!showNew ? (
-            <button onClick={handleConfirm} disabled={selected.size === 0}
-              style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: selected.size === 0 ? "#e5e7eb" : "#1a3a6e", color: selected.size === 0 ? "#9ca3af" : "white", fontSize: 12, fontWeight: 700, cursor: selected.size === 0 ? "default" : "pointer", fontFamily: FONT, transition: "all 0.15s" }}>
-              Link {selected.size > 0 ? `${selected.size} ticket${selected.size !== 1 ? "s" : ""}` : "tickets"}
+            <button onClick={handleConfirm} disabled={!exactMatch}
+              style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: !exactMatch ? "#e5e7eb" : "#1a3a6e", color: !exactMatch ? "#9ca3af" : "white", fontSize: 12, fontWeight: 700, cursor: !exactMatch ? "default" : "pointer", fontFamily: FONT, transition: "all 0.15s" }}>
+              {exactMatch ? `Link ${selected.size} ticket${selected.size !== 1 ? "s" : ""}` : `Select ${requiredQty - selected.size} more`}
             </button>
           ) : (
             <button onClick={handleCreateNew} disabled={!newTicket.event}
