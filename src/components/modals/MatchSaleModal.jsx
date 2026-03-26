@@ -307,7 +307,7 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                               <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT }}>
-                                Seats {group.seatRange}
+                                Seats {group.seatNums}
                               </span>
                               {group.score > 0 && (
                                 <span style={{ fontSize: 9, fontWeight: 700, color: "#059669", background: "rgba(5,150,105,0.1)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, padding: "1px 6px" }}>
