@@ -437,7 +437,6 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
     const ticketIdsToReset = sale.ticketIds || [];
-    // Reset tickets to Unsold
     if (ticketIdsToReset.length > 0) {
       setTickets(prev => prev.map(t =>
         ticketIdsToReset.includes(t.id)
@@ -445,11 +444,28 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
           : t
       ));
     }
-    // Clear ticketIds on the sale (but keep the sale)
     setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds: [] } : s));
-    // Close the expanded panel
     setExpandedSales(prev => ({ ...prev, [saleId]: false }));
     notify?.("Sale unmatched · tickets reset to Unsold");
+  };
+
+  const massUnmatch = () => {
+    if (!selected.size) return;
+    const selectedSales = sales.filter(s => selected.has(s.id) && s.ticketIds && s.ticketIds.length > 0);
+    if (selectedSales.length === 0) return notify?.("No matched sales in selection", "err");
+    if (!window.confirm(`Unmatch ${selectedSales.length} sale${selectedSales.length !== 1 ? "s" : ""}? Their tickets will be reset to Unsold.`)) return;
+    const allTicketIds = [...new Set(selectedSales.flatMap(s => s.ticketIds || []))];
+    if (allTicketIds.length > 0) {
+      setTickets(prev => prev.map(t =>
+        allTicketIds.includes(t.id)
+          ? { ...t, status: 'Unsold', qtyAvailable: t.qty ?? 1 }
+          : t
+      ));
+    }
+    const selectedIds = new Set(selectedSales.map(s => s.id));
+    setSales(prev => prev.map(s => selectedIds.has(s.id) ? { ...s, ticketIds: [] } : s));
+    setSelected(new Set());
+    notify?.(`Unmatched ${selectedSales.length} sale${selectedSales.length !== 1 ? "s" : ""} · tickets reset to Unsold`);
   };
 
   const exportSalesCsv = () => {
@@ -590,9 +606,14 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
         action={
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {selected.size > 0 && (
-              <button onClick={massDelete} style={{ background: "#111827", color: "white", border: "none", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
-                🗑 Delete {selected.size}
-              </button>
+              <>
+                <button onClick={massUnmatch} style={{ background: "rgba(249,115,22,0.08)", color: "#f97316", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                  Unmatch {selected.size}
+                </button>
+                <button onClick={massDelete} style={{ background: "#111827", color: "white", border: "none", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                  Delete {selected.size}
+                </button>
+              </>
             )}
             <button onClick={exportSalesCsv} style={{ background: "rgba(26,58,110,0.08)", color: "#1a3a6e", border: "1px solid rgba(26,58,110,0.2)", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
               Export CSV
@@ -917,8 +938,17 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
                         </div>
                       </div>
 
-                      {/* Delete */}
-                      <div style={{ width: COL.chevron, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }} onClick={e => e.stopPropagation()}>
+                      {/* Unmatch + Delete */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        {s.ticketIds && s.ticketIds.length > 0 && (
+                          <button onClick={e => { e.stopPropagation(); unmatchSale(s.id); }}
+                            title="Unmatch"
+                            style={{ background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer", padding: "2px 4px", borderRadius: 5, fontSize: 10, fontWeight: 600, fontFamily: FONT, lineHeight: 1, transition: "all 0.15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.color = "#f97316"; e.currentTarget.style.background = "rgba(249,115,22,0.08)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.color = "#d1d5db"; e.currentTarget.style.background = "transparent"; }}>
+                            Unlink
+                          </button>
+                        )}
                         <button onClick={e => deleteSale(s.id, e)}
                           style={{ background: "transparent", color: "#d1d5db", border: "none", cursor: "pointer", padding: "2px", borderRadius: 5, fontSize: 13, lineHeight: 1, transition: "all 0.15s" }}
                           onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; }}
