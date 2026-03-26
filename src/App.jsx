@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQueudData } from "./hooks/useQueudData";
 import { useAuth } from "./hooks/useAuth";
-import { uid, fmt, today } from "./utils/format";
+import { uid, fmt, today, fetchExchangeRate } from "./utils/format";
 import { supabase } from "./lib/supabase";
 import { Sidebar } from "./components/ui";
 import { AddTicketModal, RecordSaleModal } from "./components/Modals";
@@ -160,6 +160,14 @@ export default function App() {
     if (data._allTickets && data._allTickets.length > 1) {
       const allTickets = data._allTickets;
       const firstTicket = allTickets[0];
+      const currency = firstTicket.originalCurrency || 'GBP';
+
+      // Convert currency if not GBP
+      let exchangeRate = 1;
+      if (currency !== 'GBP') {
+        exchangeRate = await fetchExchangeRate(currency);
+        notify(`${currency} to GBP rate: ${exchangeRate.toFixed(4)}`);
+      }
 
       let eventId = null;
       if (firstTicket.event) {
@@ -173,7 +181,8 @@ export default function App() {
       }
 
       const newTickets = allTickets.map(t => {
-        const cost = parseFloat(t.cost || t.costPrice) || 0;
+        const originalCost = parseFloat(t.cost || t.costPrice) || 0;
+        const cost = currency !== 'GBP' ? parseFloat((originalCost * exchangeRate).toFixed(2)) : originalCost;
         return {
           ...BLANK_TICKET,
           id: uid(),
@@ -194,8 +203,9 @@ export default function App() {
           accountEmail: t.accountEmail || "",
           restrictions: t.restrictions || "",
           isStanding: t.isStanding || false,
-          originalCurrency: t.originalCurrency || "GBP",
-          originalAmount: t.originalAmount || cost,
+          originalCurrency: currency,
+          originalAmount: originalCost,
+          exchangeRate,
           addedAt: new Date().toISOString(),
         };
       });
