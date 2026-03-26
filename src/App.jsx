@@ -156,6 +156,57 @@ export default function App() {
 
   // ── Import parsed email into Add Ticket modal ─────────────────────────────
   const importParsed = async (data) => {
+    // Multi-ticket import - skip modal and add all directly
+    if (data._allTickets && data._allTickets.length > 1) {
+      const allTickets = data._allTickets;
+      const firstTicket = allTickets[0];
+
+      let eventId = null;
+      if (firstTicket.event) {
+        eventId = await findOrCreateEvent({
+          name: firstTicket.event,
+          venue: (firstTicket.venue || "").split(",")[0].trim(),
+          date: firstTicket.date || "",
+          time: firstTicket.time || "",
+          category: firstTicket.category || "Concert",
+        });
+      }
+
+      const newTickets = allTickets.map(t => {
+        const cost = parseFloat(t.cost || t.costPrice) || 0;
+        return {
+          ...BLANK_TICKET,
+          id: uid(),
+          event: t.event || "",
+          eventId: eventId || "",
+          date: t.date || "",
+          time: t.time || "",
+          venue: t.venue || "",
+          section: t.section || "",
+          row: t.row || "",
+          seats: t.seats || "",
+          qty: 1,
+          qtyAvailable: 1,
+          cost,
+          costPerTicket: cost,
+          orderRef: t.orderRef || "",
+          buyingPlatform: t.buyingPlatform || "Ticketmaster",
+          accountEmail: t.accountEmail || "",
+          restrictions: t.restrictions || "",
+          isStanding: t.isStanding || false,
+          originalCurrency: t.originalCurrency || "GBP",
+          originalAmount: t.originalAmount || cost,
+          addedAt: new Date().toISOString(),
+        };
+      });
+
+      setTickets(prev => [...prev, ...newTickets]);
+      logActivity("tickets_imported", "ticket", "", { event: firstTicket.event, count: newTickets.length });
+      notify(`Imported ${newTickets.length} tickets for ${firstTicket.event}`);
+      return;
+    }
+
+    // Single ticket - open Add Ticket modal for review
     let section = data.section || "";
     let row     = data.row || "";
     let seats   = data.seats || "";
