@@ -191,7 +191,7 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
     unmatchedSales.forEach(s => {
       const name = saleEventName(s);
       const key = s.eventId || name;
-      if (!g[key]) g[key] = { eventName: name, sales: [], totalRevenue: 0 };
+      if (!g[key]) g[key] = { eventName: name, eventId: s.eventId, sales: [], totalRevenue: 0 };
       g[key].sales.push(s);
       g[key].totalRevenue += s.salePrice || 0;
     });
@@ -225,6 +225,13 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {group.eventName}
                 </div>
+                {(eventMap[group.eventId]?.date || eventMap[group.eventId]?.venue) && (
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2, fontFamily: FONT, display: "flex", gap: 6, alignItems: "center" }}>
+                    {eventMap[group.eventId]?.date && <span>{eventMap[group.eventId].date}</span>}
+                    {eventMap[group.eventId]?.date && eventMap[group.eventId]?.venue && <span style={{ color: "#d1d5db" }}>·</span>}
+                    {eventMap[group.eventId]?.venue && <span>{eventMap[group.eventId].venue}</span>}
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                 <span style={{ fontSize: 11, color: "#6b7280", fontFamily: FONT }}>{totalQty} ticket{totalQty !== 1 ? "s" : ""}</span>
@@ -268,6 +275,11 @@ function UnmatchedSalesTable({ sales: unmatchedSales, eventMap, onMatch, onDelet
                   </span>
                 ) : (
                   <span style={{ fontSize: 11, color: "#d1d5db", flexShrink: 0 }}>—</span>
+                )}
+
+                {/* Sale date */}
+                {sale.date && (
+                  <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: FONT, flexShrink: 0 }}>{sale.date}</span>
                 )}
 
                 {/* Order ID + duplicate badge */}
