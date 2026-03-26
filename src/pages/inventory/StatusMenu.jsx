@@ -26,7 +26,7 @@ const StatusMenu = forwardRef(function StatusMenu({ ticket, onUpdateStatus, trig
         position: "fixed", top: pos.top, left: pos.left,
         background: "white", border: "0.5px solid #e8e8ec", borderRadius: 8,
         boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 9999,
-        minWidth: 140, overflow: "hidden",
+        minWidth: 140, overflow: "hidden", fontFamily: "'DM Sans', sans-serif",
       }}>
       {STATUSES.map(st => (
         <div key={st} onClick={e => onUpdateStatus(ticket.id, st, e)}
