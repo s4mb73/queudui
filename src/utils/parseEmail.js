@@ -691,12 +691,143 @@ export function parseTicketmasterEmail(raw) {
   }];
 }
 
+// ── Weezevent parser ──────────────────────────────────────────────────────────
+// Returns ARRAY of tickets — one per seat
+export function parseWeezeventEmail(raw) {
+  // Extract text/plain part
+  let text = '';
+  const plainPartM = raw.match(
+    /Content-Type:\s*text\/plain[^\n]*\n(?:Content-Transfer-Encoding:[^\n]*\n)?\n([\s\S]+?)(?=\n--[^\n])/i
+  );
+  if (plainPartM) {
+    text = plainPartM[1]
+      .replace(/=C2=A3/g, '£').replace(/=E2=82=AC/g, '€').replace(/=C3=A9/g, 'é')
+      .replace(/=\r?\n/g, '').replace(/=20/g, ' ').replace(/=3D/g, '=')
+      .replace(/&pound;/gi, '£').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+      .trim();
+  }
+  if (!text) text = isHtmlEmail(raw) ? stripHtml(raw) : raw;
+
+  // Clean up CSS/HTML garbage that leaks into text/plain
+  text = text
+    .replace(/[\s\S]*?\]\]>/g, '') // remove CSS blocks
+    .replace(/div\s*\{[^}]*\}/g, '')
+    .replace(/body\s*\{[^}]*\}/g, '')
+    .replace(/table[^{]*\{[^}]*\}/g, '')
+    .replace(/#[a-z_]+\s*a\s*\{[^}]*\}/g, '')
+    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');
+
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // ── Event name from Subject header
+  const subjectM = raw.match(/^Subject:\s*(?:Your order for\s+)?(.+)$/im);
+  let event = subjectM ? subjectM[1].trim().substring(0, 80) : '';
+  // Fallback: find the event name in the body (appears after CSS garbage)
+  if (!event) {
+    for (const l of lines) {
+      if (l.length >= 3 && l.length <= 80 && /^[A-Z]/.test(l) && !/^(div|body|table|#|@media|\.\w|a\[)/i.test(l)) {
+        event = l.substring(0, 80);
+        break;
+      }
+    }
+  }
+
+  // ── Date: DD/MM/YYYY
+  const dateM = text.match(/Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  let date = '';
+  if (dateM) {
+    const parts = dateM[1].split('/');
+    if (parts.length === 3) {
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const d = parseInt(parts[0]), m = parseInt(parts[1]) - 1, y = parts[2];
+      if (m >= 0 && m <= 11) date = `${d} ${months[m]} ${y}`;
+      else date = dateM[1];
+    }
+  }
+
+  // ── Time
+  const timeM = text.match(/Doors?\s*opening[:\s]+(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i)
+    || text.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+  const time = timeM ? timeM[1].trim() : '';
+
+  // ── Order ref
+  const orderM = text.match(/Order\s*number[:\s]+([A-Z0-9]+)/i);
+  const orderRef = orderM ? orderM[1].trim() : extractOrderRef(text);
+
+  // ── Venue
+  const venueM = text.match(/Event\s*venue\s*\n\s*([^\n|]+)/i)
+    || text.match(/Event\s*venue[:\s]+([^\n|]+)/i);
+  let venue = venueM ? venueM[1].replace(/\s*\|.*$/, '').trim().substring(0, 80) : '';
+
+  // ── Parse individual tickets from the attendees block
+  // Pattern: "Area: ... Sector NNN" + "Row: NNN" + "Seat: NNN" + "€NNN.NN"
+  const tickets = [];
+  const sectorM = [...text.matchAll(/Sector\s+(\d+)/gi)];
+  const rowM = [...text.matchAll(/Row[:\s]+(\d+)/gi)];
+  const seatM = [...text.matchAll(/Seat[:\s]+(\d+)/gi)];
+  const priceM = [...text.matchAll(/€\s*([\d.,]+)/g)];
+
+  // Filter prices to per-ticket amounts (not totals) - take all that match the most common price
+  const perTicketPrices = priceM
+    .map(m => parseCurrencyAmount(m[1]))
+    .filter(v => v > 0 && v < 10000);
+
+  if (seatM.length > 0) {
+    // Use the number of Seat matches as the ticket count
+    for (let i = 0; i < seatM.length; i++) {
+      const section = sectorM[i] ? sectorM[i][1] : (sectorM[0] ? sectorM[0][1] : '');
+      const row = rowM[i] ? rowM[i][1] : (rowM[0] ? rowM[0][1] : '');
+      const seat = seatM[i][1];
+      tickets.push({ section, row, seats: seat });
+    }
+  }
+
+  // ── Total cost - look for "Total incl. VAT" pattern
+  const totalVATM = text.match(/€\s*([\d.,]+)\s*(?:Sub-total|Total\s+incl)/i)
+    || text.match(/Total\s+incl\.?\s*VAT[^\n€]*€\s*([\d.,]+)/i);
+  let totalCost = totalVATM ? parseCurrencyAmount(totalVATM[1]) : 0;
+
+  // Fallback: largest € amount
+  if (!totalCost && perTicketPrices.length > 0) {
+    totalCost = Math.max(...perTicketPrices);
+  }
+
+  const qty = tickets.length || 1;
+  const costPerTicket = totalCost > 0 ? parseFloat((totalCost / qty).toFixed(2)) : 0;
+  const category = detectCategory(text);
+
+  if (tickets.length > 0) {
+    return tickets.map(t => ({
+      event, date, time, venue,
+      section: t.section, row: t.row, seats: t.seats,
+      qty: 1, costPrice: costPerTicket, orderRef,
+      restrictions: '', isStanding: false, category,
+      originalCurrency: 'EUR', originalAmount: costPerTicket,
+      buyingPlatform: 'Weezevent',
+      confidence: 'high',
+    }));
+  }
+
+  // Fallback: single ticket
+  return [{
+    event, date, time, venue,
+    section: '', row: '', seats: '',
+    qty, costPrice: totalCost, orderRef,
+    restrictions: '', isStanding: false, category,
+    originalCurrency: 'EUR', originalAmount: totalCost,
+    buyingPlatform: 'Weezevent',
+    confidence: event ? 'medium' : 'low',
+  }];
+}
+
 // ── Generic parser ────────────────────────────────────────────────────────────
 export function parseEmail(raw, site) {
   const detectedSite = site || detectSite(raw);
   if (detectedSite === 'liverpool')       return parseLiverpoolEmail(raw)[0];
   if (detectedSite === 'ticketmaster_uk') return parseTicketmasterEmail(raw)[0];
   if (detectedSite === 'ticketmaster_us') return parseTicketmasterUSEmail(raw)[0];
+  if (detectedSite === 'weezevent')       return parseWeezeventEmail(raw)[0];
 
   const text = isHtmlEmail(raw) ? stripHtml(raw) : raw;
   const find = (patterns) => {
