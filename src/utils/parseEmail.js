@@ -71,33 +71,51 @@ export function detectSite(raw) {
   if (/liverpoolfc\.com|@fans\.emails\.liverpoolfc|Liverpool FC Booking Confirmation/i.test(raw)) return 'liverpool';
   if (/ticketmaster\.co\.uk|email\.ticketmaster\.co\.uk/i.test(raw)) return 'ticketmaster_uk';
   if (/ticketmaster\.com|email\.ticketmaster\.com/i.test(raw)) return 'ticketmaster_us';
+  if (/weezevent\.com|@.*weezevent/i.test(raw)) return 'weezevent';
   if (/axs\.com|@axs\.com|AXS Tickets/i.test(raw)) return 'axs';
   if (/seetickets\.com|@seetickets/i.test(raw)) return 'seetickets';
   if (/eticketing\.co\.uk/i.test(raw)) return 'eticketing';
+  if (/dice\.fm|@dice\.fm/i.test(raw)) return 'dice';
   return 'generic';
 }
 
 // ── Extract cost — shared helper ──────────────────────────────────────────────
+// Handles £, €, $ with comma as thousands separator
+function parseCurrencyAmount(str) {
+  if (!str) return 0;
+  // Handle European format: €1.770,00 or €1,770.00
+  const euroComma = str.match(/([\d.]+),(\d{2})$/);
+  if (euroComma) return parseFloat(str.replace(/\./g, '').replace(',', '.'));
+  return parseFloat(str.replace(/,/g, ''));
+}
+
 function extractCost(text) {
-  const totalInclFee = text.match(/Total\s*\(incl\.?\s*fee[s]?\)[^\n£€$]*[£€$]\s*([\d,]+\.?\d*)/i);
-  if (totalInclFee) return parseFloat(totalInclFee[1].replace(/,/g, ''));
+  const totalInclFee = text.match(/Total\s*\(?incl\.?\s*(?:fee[s]?|VAT)\)?[^\n£€$]*[£€$]\s*([\d.,]+)/i);
+  if (totalInclFee) return parseCurrencyAmount(totalInclFee[1]);
 
-  const totalCharge = text.match(/Total\s+(?:Charge|Amount|Due)[^\n£€$]{0,20}[£€$]\s*([\d,]+\.?\d*)/i);
-  if (totalCharge) return parseFloat(totalCharge[1].replace(/,/g, ''));
+  const totalInclVAT = text.match(/Total\s+incl\.?\s*VAT[^\n£€$]*[£€$]\s*([\d.,]+)/i);
+  if (totalInclVAT) return parseCurrencyAmount(totalInclVAT[1]);
 
-  const totalPaid = text.match(/Total\s+Paid[^\n£€$]{0,10}[£€$]\s*([\d,]+\.?\d*)/i);
-  if (totalPaid) return parseFloat(totalPaid[1].replace(/,/g, ''));
+  // Match €1,947.00 or €1.947,00 patterns directly
+  const eurTotal = text.match(/[€]\s*([\d.,]+)\s*(?:Sub-total|Total)/i);
+  if (eurTotal) return parseCurrencyAmount(eurTotal[1]);
 
-  const orderTotal = text.match(/(?:Order|Grand|Booking)\s+Total[^\n£€$]{0,20}[£€$]\s*([\d,]+\.?\d*)/i);
-  if (orderTotal) return parseFloat(orderTotal[1].replace(/,/g, ''));
+  const totalCharge = text.match(/Total\s+(?:Charge|Amount|Due)[^\n£€$]{0,20}[£€$]\s*([\d.,]+)/i);
+  if (totalCharge) return parseCurrencyAmount(totalCharge[1]);
 
-  const amountPaid = text.match(/Amount\s+(?:Paid|Charged)[^\n£€$]{0,10}[£€$]\s*([\d,]+\.?\d*)/i);
-  if (amountPaid) return parseFloat(amountPaid[1].replace(/,/g, ''));
+  const totalPaid = text.match(/Total\s+Paid[^\n£€$]{0,10}[£€$]\s*([\d.,]+)/i);
+  if (totalPaid) return parseCurrencyAmount(totalPaid[1]);
+
+  const orderTotal = text.match(/(?:Order|Grand|Booking)\s+Total[^\n£€$]{0,20}[£€$]\s*([\d.,]+)/i);
+  if (orderTotal) return parseCurrencyAmount(orderTotal[1]);
+
+  const amountPaid = text.match(/Amount\s+(?:Paid|Charged)[^\n£€$]{0,10}[£€$]\s*([\d.,]+)/i);
+  if (amountPaid) return parseCurrencyAmount(amountPaid[1]);
 
   const amounts = [];
-  for (const m of text.matchAll(/[£€$]\s*([\d,]+\.?\d*)/g)) {
-    const v = parseFloat(m[1].replace(/,/g, ''));
-    if (v >= 5 && v <= 5000) amounts.push(v);
+  for (const m of text.matchAll(/[£€$]\s*([\d.,]+)/g)) {
+    const v = parseCurrencyAmount(m[1]);
+    if (v >= 5 && v <= 50000) amounts.push(v);
   }
   return amounts.length > 0 ? Math.max(...amounts) : 0;
 }
@@ -725,10 +743,11 @@ export function parseEmail(raw, site) {
     /(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/i,
     /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i,
     /(?:date|when|on)[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+    /\bDate:\s*(\d{1,2}\/\d{1,2}\/\d{4})\b/i,
   ]);
   const timeStr = find([
     /[·•]\s*(\d{1,2}:\d{2}\s*(?:AM|PM|pm|am))/i,
-    /(?:doors?|kick[- ]?off|start|gates?|showtime)[:\s]+(\d{1,2}[:.]\d{2}\s*(?:am|pm)?)/i,
+    /(?:doors?\s*opening|doors?|kick[- ]?off|start|gates?|showtime)[:\s]+(\d{1,2}[:.]\d{2}\s*(?:am|pm)?)/i,
     /\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b/,
     /\b(\d{1,2}:\d{2}\s*pm)\b/i,
   ]);
@@ -757,13 +776,16 @@ export function parseEmail(raw, site) {
   if (qty > 100) qty = 100;
 
   let section = '', row = '', seats = '';
-  const secRowSeatMatch = text.match(/Sec(?:tion)?\s*([\w\d]+)[,·\s]+Row\s*([\w\d]+)[,·\s]+Seat[s]?\s*([\d\s,\-–]+)/i);
+  // Try structured section/row/seat patterns
+  const secRowSeatMatch = text.match(/(?:Sec(?:tion)?|Sector|Block|BLK)\s*([\w\d]+)[,·\s]+Row[:\s]*([\w\d]+)[,·\s]+Seat[s]?[:\s]*([\d\s,\-–]+)/i);
   if (secRowSeatMatch) {
     section = secRowSeatMatch[1].trim();
     row     = secRowSeatMatch[2].trim();
     seats   = secRowSeatMatch[3].trim();
   } else {
-    const secMatch = text.match(/(?:Sec(?:tion)?|Block)[:\s]+([\w\d]+)/i);
+    // Weezevent-style: "Sector 122" on its own line + "Row: 18" + "Seat: 21"
+    const sectorMatch = text.match(/(?:Sec(?:tion)?|Sector|Block|BLK|Area)[:\s]+(?:.*?[-–]\s*)?(?:Sector|Sec(?:tion)?|Block|BLK)?\s*([\w\d]+)/i);
+    const secMatch = sectorMatch || text.match(/(?:Sec(?:tion)?|Block|BLK)[:\s]+([\w\d]+)/i);
     if (secMatch) section = secMatch[1].trim();
     const rowMatch = text.match(/\bRow\s+([\w\d]{1,4})\b/i);
     if (rowMatch) row = rowMatch[1].trim();
@@ -789,6 +811,11 @@ export function parseEmail(raw, site) {
   const costPrice = extractCost(text);
   const orderRef  = extractOrderRef(text);
 
+  // Detect original currency from the email
+  const hasCurrencyEUR = /[€]|EUR\s*\d/i.test(text);
+  const hasCurrencyUSD = /\$\d|USD\s*\d/i.test(text) && !/CA\$|A\$/i.test(text);
+  const originalCurrency = hasCurrencyEUR ? 'EUR' : hasCurrencyUSD ? 'USD' : 'GBP';
+
   let restrictions = ticketType
     .replace(/^Album Pre-Order Pre-Sale\s*[-–]\s*/i, '')
     .replace(/^Pre-Sale\s*[-–]\s*/i, '')
@@ -806,6 +833,8 @@ export function parseEmail(raw, site) {
     venue, section, row, seats, qty, costPrice, orderRef, restrictions,
     isStanding:  standing,
     category:    detectCategory(text),
+    originalCurrency,
+    originalAmount: costPrice,
     confidence:  (event && (date || venue)) ? 'high' : event ? 'medium' : 'low',
   };
 }
