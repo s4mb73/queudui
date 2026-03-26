@@ -6,17 +6,14 @@ import { FONT, PLATFORM_COLORS } from "../../lib/schema";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function resolveEventName(sale, tickets) {
-  // 1. Try matched tickets (most reliable)
   const linked = (sale.ticketIds || []).map(id => tickets.find(t => t.id === id)).filter(Boolean);
   if (linked[0]?.event) return linked[0].event;
-  // 2. Fall back to sale fields
   if (sale.eventName) return sale.eventName;
   if (sale.notes)     return sale.notes;
-  return null; // no name known — will show event details instead
+  return null;
 }
 
 function scoreTicket(ticket, sale) {
-  // Returns a relevance score — higher = better match
   let score = 0;
   const saleSection = (sale.section || "").toLowerCase().trim();
   const saleRow     = (sale.row     || "").toLowerCase().trim();
@@ -29,7 +26,6 @@ function scoreTicket(ticket, sale) {
   if (saleRow     && tRow     && saleRow     === tRow)     score += 8;
   if (saleSeats   && tSeats   && tSeats.includes(saleSeats)) score += 6;
 
-  // Platform match on buying side
   const salePlatform = (sale.sellingPlatform || "").toLowerCase();
   const tPlatform    = (ticket.buyingPlatform || "").toLowerCase();
   if (salePlatform && tPlatform && tPlatform.includes(salePlatform)) score += 3;
@@ -37,26 +33,84 @@ function scoreTicket(ticket, sale) {
   return score;
 }
 
+// Build consecutive seat groups from candidates
+function buildSeatGroups(candidates, qty) {
+  if (qty <= 1) return []; // No grouping needed for single tickets
+
+  // Group candidates by section+row
+  const bySecRow = {};
+  candidates.forEach(t => {
+    const key = `${(t.section || "").toLowerCase().trim()}||${(t.row || "").toLowerCase().trim()}`;
+    if (!bySecRow[key]) bySecRow[key] = [];
+    bySecRow[key].push(t);
+  });
+
+  const groups = [];
+
+  Object.values(bySecRow).forEach(rowTickets => {
+    // Parse seat numbers and sort
+    const withNum = rowTickets
+      .map(t => ({ ...t, _seatNum: parseInt(t.seats) }))
+      .filter(t => !isNaN(t._seatNum))
+      .sort((a, b) => a._seatNum - b._seatNum);
+
+    if (withNum.length < qty) return;
+
+    // Find all consecutive windows of size qty
+    for (let i = 0; i <= withNum.length - qty; i++) {
+      const window = withNum.slice(i, i + qty);
+      // Check if consecutive
+      let isConsecutive = true;
+      for (let j = 1; j < window.length; j++) {
+        if (window[j]._seatNum !== window[j - 1]._seatNum + 1) {
+          isConsecutive = false;
+          break;
+        }
+      }
+      if (isConsecutive) {
+        const first = window[0];
+        const last = window[window.length - 1];
+        const totalCost = window.reduce((a, t) => a + (t.cost || 0), 0);
+        groups.push({
+          ids: window.map(t => t.id),
+          tickets: window,
+          section: first.section || "",
+          row: first.row || "",
+          seatRange: `${first.seats}-${last.seats}`,
+          seatNums: window.map(t => t.seats).join(", "),
+          event: first.event || "",
+          date: first.date || "",
+          buyingPlatform: first.buyingPlatform || "",
+          orderRef: first.orderRef || "",
+          totalCost,
+          score: window.reduce((a, t) => a + (t._score || 0), 0),
+        });
+      }
+    }
+  });
+
+  // Sort by score (best matches first), then by seat number
+  return groups.sort((a, b) => b.score - a.score || a.tickets[0]._seatNum - b.tickets[0]._seatNum);
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink, onClose }) {
-  const [selected, setSelected]   = useState(new Set((sale.ticketIds || [])));
-  const [showNew, setShowNew]     = useState(false);
-  const [newTicket, setNewTicket] = useState({
+  const [selected, setSelected]       = useState(new Set((sale.ticketIds || [])));
+  const [showNew, setShowNew]         = useState(false);
+  const [manualMode, setManualMode]   = useState(false);
+  const [newTicket, setNewTicket]     = useState({
     event: "", date: "", venue: "", section: "", row: "", seats: "",
     qty: sale.qtySold || 1, cost: "", buyingPlatform: "", orderRef: "",
   });
 
-  // Resolve event name — never "Unknown Event" if tickets have names
   const eventName = resolveEventName(sale, tickets);
+  const requiredQty = sale.qtySold || 1;
 
-  // Available tickets — those not already Sold/Delivered to *another* sale
   const candidates = useMemo(() => {
     return tickets
       .filter(t => {
-        // Only show available tickets (Unsold or Listed)
         if (!["Unsold", "Listed"].includes(t.status)) return false;
-        // Must have available qty
         if ((t.qtyAvailable ?? t.qty ?? 1) < 1) return false;
         return true;
       })
@@ -64,7 +118,12 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
       .sort((a, b) => b._score - a._score);
   }, [tickets, sale]);
 
-  const requiredQty = sale.qtySold || 1;
+  // Build consecutive seat groups for multi-ticket sales
+  const seatGroups = useMemo(() => buildSeatGroups(candidates, requiredQty), [candidates, requiredQty]);
+
+  const selectGroup = (group) => {
+    setSelected(new Set(group.ids));
+  };
 
   const toggle = (id) => {
     setSelected(prev => {
@@ -72,7 +131,6 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
       if (n.has(id)) {
         n.delete(id);
       } else {
-        // Don't allow selecting more than required qty
         if (n.size >= requiredQty) return prev;
         n.add(id);
       }
@@ -92,7 +150,7 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
     onCreateAndLink(sale.id, {
       ...newTicket,
       qty: parseInt(newTicket.qty) || 1,
-      qtyAvailable: 0, // will be sold immediately
+      qtyAvailable: 0,
       cost: parseFloat(newTicket.cost) || 0,
       status: "Sold",
     });
@@ -108,6 +166,8 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
     }
     return d;
   };
+
+  const showGroupView = requiredQty > 1 && seatGroups.length > 0 && !manualMode;
 
   const overlay = {
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
@@ -141,7 +201,6 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
               <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", fontFamily: FONT, letterSpacing: "-0.3px" }}>
                 Match Sale to Inventory
               </div>
-              {/* Sale summary — uses resolved event name */}
               <div style={{
                 marginTop: 8, padding: "8px 12px",
                 background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
@@ -157,7 +216,7 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                       {sale.sellingPlatform}
                     </span>
                   )}
-                  {sale.qtySold && <span style={{ fontSize: 11, color: "#a16207" }}>{sale.qtySold}× tickets</span>}
+                  {sale.qtySold && <span style={{ fontSize: 11, color: "#a16207", fontWeight: 600 }}>{sale.qtySold}x tickets</span>}
                   {sale.salePrice > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#a16207" }}>{fmt(sale.salePrice)}</span>}
                   {sale.section && <span style={{ fontSize: 11, color: "#a16207" }}>Sec {sale.section}</span>}
                   {sale.row     && <span style={{ fontSize: 11, color: "#a16207" }}>Row {sale.row}</span>}
@@ -165,13 +224,13 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                 </div>
               </div>
             </div>
-            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af", padding: "2px 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af", padding: "2px 4px", lineHeight: 1, flexShrink: 0 }}>x</button>
           </div>
 
           {/* Tabs */}
           <div style={{ display: "flex", gap: 4, marginTop: 12 }}>
             {["Match existing", "Create new ticket"].map(tab => (
-              <button key={tab} onClick={() => setShowNew(tab === "Create new ticket")}
+              <button key={tab} onClick={() => { setShowNew(tab === "Create new ticket"); setManualMode(false); }}
                 style={{
                   padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600,
                   fontFamily: FONT, cursor: "pointer", border: "none",
@@ -199,18 +258,110 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                     Create a new ticket instead
                   </button>
                 </div>
-              ) : (
+              ) : showGroupView ? (
+                /* ── Grouped consecutive seats view ── */
                 <>
                   <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontFamily: FONT, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>Select exactly <strong style={{ color: "#111827" }}>{requiredQty} ticket{requiredQty !== 1 ? "s" : ""}</strong> to match this sale. Best matches shown first.</span>
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, fontFamily: FONT, padding: "3px 10px", borderRadius: 10,
-                      background: exactMatch ? "rgba(5,150,105,0.08)" : selected.size === 0 ? "#f1f5f9" : "rgba(239,68,68,0.08)",
-                      color: exactMatch ? "#059669" : selected.size === 0 ? "#94a3b8" : "#ef4444",
-                      border: `1px solid ${exactMatch ? "rgba(5,150,105,0.2)" : selected.size === 0 ? "#e2e6ea" : "rgba(239,68,68,0.2)"}`,
-                    }}>
-                      {selected.size} / {requiredQty}
-                    </span>
+                    <span>Select a group of <strong style={{ color: "#111827" }}>{requiredQty} consecutive seats</strong></span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: FONT, padding: "3px 10px", borderRadius: 10,
+                        background: exactMatch ? "rgba(5,150,105,0.08)" : "#f1f5f9",
+                        color: exactMatch ? "#059669" : "#94a3b8",
+                        border: `1px solid ${exactMatch ? "rgba(5,150,105,0.2)" : "#e2e6ea"}`,
+                      }}>
+                        {selected.size} / {requiredQty}
+                      </span>
+                      <button onClick={() => { setManualMode(true); setSelected(new Set()); }}
+                        style={{ fontSize: 10, color: "#6b7280", background: "none", border: "1px solid #e2e6ea", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: FONT, fontWeight: 600 }}>
+                        Manual
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {seatGroups.map((group, gi) => {
+                      const isSelected = group.ids.every(id => selected.has(id));
+                      const platformColor = PLATFORM_COLORS[group.buyingPlatform] || PLATFORM_COLORS.Default;
+                      return (
+                        <div key={gi} onClick={() => selectGroup(group)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 12,
+                            padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                            border: `1.5px solid ${isSelected ? "#059669" : "#e2e6ea"}`,
+                            background: isSelected ? "rgba(5,150,105,0.04)" : "#fafbfc",
+                            transition: "all 0.12s",
+                          }}
+                          onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#f1f4f8"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(5,150,105,0.04)" : "#fafbfc"; }}
+                        >
+                          {/* Radio */}
+                          <div style={{
+                            width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+                            border: `2px solid ${isSelected ? "#059669" : "#d1d5db"}`,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            {isSelected && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#059669" }} />}
+                          </div>
+
+                          {/* Group info */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT }}>
+                                Seats {group.seatRange}
+                              </span>
+                              {group.score > 0 && (
+                                <span style={{ fontSize: 9, fontWeight: 700, color: "#059669", background: "rgba(5,150,105,0.1)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, padding: "1px 6px" }}>
+                                  Best match
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
+                              {group.section && <span style={{ background: "#eef2ff", color: "#1a3a6e", border: "1px solid #c7d2fe", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>Sec {group.section}</span>}
+                              {group.row && <span style={{ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>Row {group.row}</span>}
+                              <span style={{ background: "#fff7ed", color: "#f97316", border: "1px solid #fed7aa", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 600 }}>
+                                {requiredQty}x seats ({group.seatNums})
+                              </span>
+                              {group.date && <span style={{ fontSize: 10, color: "#6b7280" }}>{fmtD(group.date)}</span>}
+                              {group.buyingPlatform && (
+                                <span style={{ fontSize: 10, fontWeight: 600, color: platformColor, background: `${platformColor}14`, border: `1px solid ${platformColor}30`, borderRadius: 4, padding: "1px 6px" }}>
+                                  {group.buyingPlatform}
+                                </span>
+                              )}
+                              {group.orderRef && <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace" }}>#{group.orderRef}</span>}
+                            </div>
+                          </div>
+
+                          {/* Cost */}
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            {group.totalCost > 0 && <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FONT }}>{fmt(group.totalCost)}</div>}
+                            <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{requiredQty} tickets</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                /* ── Manual individual ticket selection ── */
+                <>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontFamily: FONT, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>Select exactly <strong style={{ color: "#111827" }}>{requiredQty} ticket{requiredQty !== 1 ? "s" : ""}</strong> to match this sale.</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: FONT, padding: "3px 10px", borderRadius: 10,
+                        background: exactMatch ? "rgba(5,150,105,0.08)" : selected.size === 0 ? "#f1f5f9" : "rgba(239,68,68,0.08)",
+                        color: exactMatch ? "#059669" : selected.size === 0 ? "#94a3b8" : "#ef4444",
+                        border: `1px solid ${exactMatch ? "rgba(5,150,105,0.2)" : selected.size === 0 ? "#e2e6ea" : "rgba(239,68,68,0.2)"}`,
+                      }}>
+                        {selected.size} / {requiredQty}
+                      </span>
+                      {requiredQty > 1 && seatGroups.length > 0 && (
+                        <button onClick={() => { setManualMode(false); setSelected(new Set()); }}
+                          style={{ fontSize: 10, color: "#6b7280", background: "none", border: "1px solid #e2e6ea", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: FONT, fontWeight: 600 }}>
+                          Groups
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {candidates.map(t => {
@@ -228,7 +379,6 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                           onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#f1f4f8"; }}
                           onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "rgba(26,58,110,0.04)" : "#fafbfc"; }}
                         >
-                          {/* Checkbox */}
                           <div style={{
                             width: 16, height: 16, borderRadius: 4, flexShrink: 0,
                             border: `1.5px solid ${isSelected ? "#1a3a6e" : "#d1d5db"}`,
@@ -238,7 +388,6 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                             {isSelected && <span style={{ color: "white", fontSize: 9, fontWeight: 700 }}>✓</span>}
                           </div>
 
-                          {/* Ticket info */}
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                               <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
@@ -264,7 +413,6 @@ export default function MatchSaleModal({ sale, tickets, onLink, onCreateAndLink,
                             </div>
                           </div>
 
-                          {/* Cost + availability */}
                           <div style={{ textAlign: "right", flexShrink: 0 }}>
                             {t.cost > 0 && <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FONT }}>{fmt(t.cost)}</div>}
                             <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
