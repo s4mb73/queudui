@@ -433,6 +433,8 @@ export function useQueudData(user) {
   // ── Link tickets to a sale ────────────────────────────────────────────────
 
   const linkTicketsToSale = useCallback(async (saleId, ticketIds) => {
+    // Clear any old junction rows for this sale first, then insert new ones
+    await supabase.from('sale_tickets').delete().eq('sale_id', saleId);
     const rows = ticketIds.map(tid => ({ sale_id: saleId, ticket_id: tid }));
     const { error } = await supabase.from('sale_tickets').upsert(rows);
     if (error) { console.error('Link error:', error); return; }
@@ -443,10 +445,9 @@ export function useQueudData(user) {
       .in('id', ticketIds);
     if (ticketError) console.error('Ticket status error:', ticketError);
 
+    // Replace ticketIds entirely (not merge) to avoid stale IDs after unmatch/rematch
     setSalesState(prev => prev.map(s =>
-      s.id === saleId
-        ? { ...s, ticketIds: [...new Set([...(s.ticketIds || []), ...ticketIds])] }
-        : s
+      s.id === saleId ? { ...s, ticketIds } : s
     ));
 
     setTicketsState(prev => prev.map(t =>

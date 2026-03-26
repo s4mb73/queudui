@@ -1,5 +1,6 @@
 // src/pages/Sales.jsx
 import { useState, useMemo, useEffect, useRef } from "react";
+import { supabase } from "../lib/supabase";
 import { KpiCard } from "../components/ui";
 import { fmt, fmtPct } from "../utils/format";
 import {
@@ -439,14 +440,23 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
     const ticketIdsToReset = sale.ticketIds || [];
+    // Update local state immediately
     if (ticketIdsToReset.length > 0) {
       setTickets(prev => prev.map(t =>
         ticketIdsToReset.includes(t.id)
           ? { ...t, status: 'Unsold', qtyAvailable: t.qty ?? 1 }
           : t
       ));
+      // Persist ticket reset to DB
+      supabase.from('tickets')
+        .update({ status: 'Unsold', qty_available: 1 })
+        .in('id', ticketIdsToReset)
+        .then(({ error }) => { if (error) console.error('Ticket reset error:', error); });
     }
     setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds: [] } : s));
+    // Clean up junction table
+    supabase.from('sale_tickets').delete().eq('sale_id', saleId)
+      .then(({ error }) => { if (error) console.error('sale_tickets cleanup error:', error); });
     setExpandedSales(prev => ({ ...prev, [saleId]: false }));
     notify?.("Sale unmatched · tickets reset to Unsold");
   };
@@ -457,15 +467,24 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
     if (selectedSales.length === 0) return notify?.("No matched sales in selection", "err");
     if (!window.confirm(`Unmatch ${selectedSales.length} sale${selectedSales.length !== 1 ? "s" : ""}? Their tickets will be reset to Unsold.`)) return;
     const allTicketIds = [...new Set(selectedSales.flatMap(s => s.ticketIds || []))];
+    const saleIds = selectedSales.map(s => s.id);
+    // Update local state immediately
     if (allTicketIds.length > 0) {
       setTickets(prev => prev.map(t =>
         allTicketIds.includes(t.id)
           ? { ...t, status: 'Unsold', qtyAvailable: t.qty ?? 1 }
           : t
       ));
+      supabase.from('tickets')
+        .update({ status: 'Unsold', qty_available: 1 })
+        .in('id', allTicketIds)
+        .then(({ error }) => { if (error) console.error('Ticket reset error:', error); });
     }
-    const selectedIds = new Set(selectedSales.map(s => s.id));
+    const selectedIds = new Set(saleIds);
     setSales(prev => prev.map(s => selectedIds.has(s.id) ? { ...s, ticketIds: [] } : s));
+    // Clean up junction table
+    supabase.from('sale_tickets').delete().in('sale_id', saleIds)
+      .then(({ error }) => { if (error) console.error('sale_tickets cleanup error:', error); });
     setSelected(new Set());
     notify?.(`Unmatched ${selectedSales.length} sale${selectedSales.length !== 1 ? "s" : ""} · tickets reset to Unsold`);
   };
