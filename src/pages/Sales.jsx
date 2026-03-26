@@ -422,9 +422,11 @@ export default function Sales({ tickets, sales, setSales, updateSale, setTickets
 
   const handleLink = async (saleId, ticketIds) => {
     setMatchingSale(null);
+    // Update local state immediately so the sale moves from unmatched to matched
+    setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds } : s));
+    // Then persist to DB
     if (linkTicketsToSale) await linkTicketsToSale(saleId, ticketIds);
-    else setSales(prev => prev.map(s => s.id === saleId ? { ...s, ticketIds } : s));
-    notify?.(`✅ Sale linked to ${ticketIds.length} ticket${ticketIds.length !== 1 ? "s" : ""}`);
+    notify?.(`Sale linked to ${ticketIds.length} ticket${ticketIds.length !== 1 ? "s" : ""}`);
   };
 
   const handleCreateAndLink = (saleId, newTicket) => {
