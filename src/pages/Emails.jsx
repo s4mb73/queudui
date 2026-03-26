@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { fmt, today, uid } from "../utils/format";
-import { parseEmail, parseLiverpoolEmail, parseTicketmasterEmail, parseTicketmasterUSEmail, detectSite, stripEmailForAI, isStandingTicket } from "../utils/parseEmail";
+import { parseEmail, parseLiverpoolEmail, parseTicketmasterEmail, parseTicketmasterUSEmail, parseWeezeventEmail, detectSite, stripEmailForAI, isStandingTicket } from "../utils/parseEmail";
 import { parseViagogoSaleEmail, parseTixstockSaleEmail, detectSaleSite } from "../utils/parseSaleEmail";
 import SalesPlatforms   from "./Settings/SalesPlatforms";
 import EmailScraper     from "./Settings/EmailScraper";
@@ -335,8 +335,25 @@ export default function Emails({ settings, setSettings, tickets, setTickets, sal
   async function parseWithAI() {
     if (!emailText.trim()) return;
     const site = detectSite(emailText);
+
+    // Multi-ticket parsers - import all tickets directly
+    if (site === "weezevent") {
+      const allTickets = parseWeezeventEmail(emailText);
+      if (allTickets.length > 0) {
+        setParsed(allTickets[0]); // Show first for preview
+        setParsed({ ...allTickets[0], _allTickets: allTickets, qty: allTickets.length });
+      }
+      return;
+    }
+    if (site === "ticketmaster_uk") {
+      const allTickets = parseTicketmasterEmail(emailText);
+      if (allTickets.length > 0) {
+        setParsed({ ...allTickets[0], _allTickets: allTickets, qty: allTickets.length });
+      }
+      return;
+    }
+
     if (site === "liverpool") { setParsed(parseLiverpoolEmail(emailText)[0]); return; }
-    if (site === "ticketmaster_uk" && !settings.openAiKey) { setParsed(parseTicketmasterEmail(emailText)[0]); return; }
     if (site === "ticketmaster_us") { setParsed(parseTicketmasterUSEmail(emailText)[0]); return; }
     if (!settings.openAiKey) { setParsed(parseEmail(emailText)); return; }
     setAiParsing(true); setParsed(null);
