@@ -1,22 +1,33 @@
 import { forwardRef, useRef, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { STATUSES, STATUS_STYLES } from "./helpers";
 
-const StatusMenu = forwardRef(function StatusMenu({ ticket, onUpdateStatus }, ref) {
+const StatusMenu = forwardRef(function StatusMenu({ ticket, onUpdateStatus, triggerRef }, ref) {
   const menuRef = useRef(null);
-  const [openUp, setOpenUp] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, openUp: false });
 
   useEffect(() => {
-    if (menuRef.current) {
-      const rect = menuRef.current.getBoundingClientRect();
-      if (rect.bottom > window.innerHeight - 20) {
-        setOpenUp(true);
-      }
-    }
-  }, []);
+    // Position relative to the trigger button using fixed positioning
+    const trigger = triggerRef?.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuHeight = 220; // approximate height of 5 status items
+    const openUp = rect.bottom + menuHeight > window.innerHeight;
+    setPos({
+      top: openUp ? rect.top - menuHeight : rect.bottom + 4,
+      left: Math.min(rect.right - 140, window.innerWidth - 160),
+      openUp,
+    });
+  }, [triggerRef]);
 
-  return (
+  const menu = (
     <div ref={el => { menuRef.current = el; if (typeof ref === 'function') ref(el); else if (ref) ref.current = el; }}
-      style={{ position: "absolute", [openUp ? "bottom" : "top"]: "100%", right: 0, [openUp ? "marginBottom" : "marginTop"]: 4, background: "white", border: "0.5px solid #e8e8ec", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, minWidth: 140, overflow: "hidden" }}>
+      style={{
+        position: "fixed", top: pos.top, left: pos.left,
+        background: "white", border: "0.5px solid #e8e8ec", borderRadius: 8,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 9999,
+        minWidth: 140, overflow: "hidden",
+      }}>
       {STATUSES.map(st => (
         <div key={st} onClick={e => onUpdateStatus(ticket.id, st, e)}
           style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", background: ticket.status === st ? "#f9f9fb" : "transparent", fontSize: 12, fontWeight: ticket.status === st ? 600 : 400, color: STATUS_STYLES[st].text }}
@@ -28,6 +39,9 @@ const StatusMenu = forwardRef(function StatusMenu({ ticket, onUpdateStatus }, re
       ))}
     </div>
   );
+
+  // Portal to document.body to escape overflow:hidden containers
+  return createPortal(menu, document.body);
 });
 
 export default StatusMenu;

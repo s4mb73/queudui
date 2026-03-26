@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { fmt } from "../../utils/format";
 import { FONT, STATUS_STYLES, cleanRestriction } from "./helpers";
 import StatusMenu from "./StatusMenu";
@@ -16,6 +17,7 @@ export default function TicketRow({
   onDelTicket,
   onOpenSale,
 }) {
+  const statusTriggerRef = useRef(null);
   const tRestricted = t.restrictions && /restrict|side.?view|limited.?view|partial.?view|obstructed|severely/i.test(t.restrictions);
   const s      = t.status || "Unsold";
   const sStyle = STATUS_STYLES[s];
@@ -57,7 +59,7 @@ export default function TicketRow({
 
       {/* Status dropdown */}
       <div style={{ position: "relative", width: 90, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-        <div onClick={() => onSetOpenStatusMenu(openStatusMenu === t.id ? null : t.id)}
+        <div ref={statusTriggerRef} onClick={() => onSetOpenStatusMenu(openStatusMenu === t.id ? null : t.id)}
           style={{ display: "inline-flex", alignItems: "center", gap: 4, background: sStyle.bg, color: sStyle.text, borderRadius: 20, padding: "3px 9px", fontSize: 11, fontWeight: 600, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
           <div style={{ width: 5, height: 5, borderRadius: "50%", background: sStyle.dot }} />{s} ▾
         </div>
@@ -66,6 +68,7 @@ export default function TicketRow({
             ref={statusMenuRef}
             ticket={t}
             onUpdateStatus={onUpdateStatus}
+            triggerRef={statusTriggerRef}
           />
         )}
       </div>
