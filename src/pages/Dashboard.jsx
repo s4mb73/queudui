@@ -1,7 +1,64 @@
+import { useState, useEffect } from "react";
 import { fmt, fmtPct } from "../utils/format";
 import { KpiCard } from "../components/ui";
+import { supabase } from "../lib/supabase";
+
+function timeAgo(dateStr) {
+  const now = new Date();
+  const then = new Date(dateStr);
+  const diffMs = now - then;
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + "m ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h ago";
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return days + "d ago";
+  return Math.floor(days / 30) + "mo ago";
+}
+
+function getInitials(email) {
+  if (!email) return "?";
+  const name = email.split("@")[0];
+  const parts = name.split(/[._-]/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function describeAction(entry) {
+  const d = entry.details || {};
+  const event = d.event_name || d.event || "an event";
+  switch (entry.action) {
+    case "ticket_added":
+      return `added ${d.qty || ""} ticket${(d.qty || 0) !== 1 ? "s" : ""} for ${event}`;
+    case "ticket_edited":
+      return `edited ticket for ${event}`;
+    case "tickets_imported":
+      return `imported ${d.count || "?"} tickets for ${event}`;
+    case "sale_recorded":
+      return `recorded sale of ${d.qtySold || "?"}x for ${event}`;
+    default:
+      return entry.action.replace(/_/g, " ");
+  }
+}
 
 export default function Dashboard({ tickets, sales, events, setView, setShowAddTicket, setEditingTicket, setTf, blankTicket }) {
+
+  // ── Recent Activity ───────────────────────────────────────────────────────
+  const [activity, setActivity] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("activity_log")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (!cancelled && data) setActivity(data);
+      if (error) console.error("activity_log fetch error:", error);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Build event lookup map ─────────────────────────────────────────────────
   const eventMap = (events || []).reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
@@ -206,6 +263,40 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
             })}
           </div>
         )}
+      </div>
+
+      {/* Recent Activity */}
+      <div style={{ ...card, overflow: "hidden", marginTop: 14 }}>
+        <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #e2e6ea" }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", letterSpacing: "-0.2px" }}>Recent Activity</div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Latest actions across your team</div>
+        </div>
+        <div>
+          {activity.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "32px 0", color: "#94a3b8", fontSize: 13 }}>No recent activity</div>
+          ) : activity.map((entry, i) => {
+            const initials = getInitials(entry.user_email);
+            const userName = entry.user_email ? entry.user_email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown";
+            return (
+              <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", borderBottom: i < activity.length - 1 ? "0.5px solid #f1f4f8" : "none" }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: "50%",
+                  background: "linear-gradient(135deg, #1a3a6e, #2a5298)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
+                  letterSpacing: "0.5px",
+                }}>{initials}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontWeight: 600 }}>{userName}</span>{" "}
+                    <span style={{ color: "#475569" }}>{describeAction(entry)}</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0, whiteSpace: "nowrap" }}>{timeAgo(entry.created_at)}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

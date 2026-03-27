@@ -1,3 +1,5 @@
+import { useState, useRef } from "react";
+import { supabase } from "../../lib/supabase";
 import { fmt } from "../../utils/format";
 import {
   fmtDate, getTime, venueClean, sectionSummary,
@@ -26,6 +28,8 @@ export default function EventGroup({
   openEdit,
   delTicket,
   openSale,
+  setTickets,
+  notify,
 }) {
   const isExpanded   = expandedEvents[eKey];
   const eventTickets = eventGroup.tickets;
@@ -39,6 +43,33 @@ export default function EventGroup({
   const allSelected  = eventTickets.every(t => multiSelected[t.id]);
   const accent       = eventAccent(eventGroup.category);
   const timeStr      = getTime(eventGroup.date, eventGroup.time);
+
+  const [editingDate, setEditingDate] = useState(false);
+  const dateInputRef = useRef(null);
+
+  const saveDate = async (newDate) => {
+    setEditingDate(false);
+    if (!newDate || newDate === eventGroup.date) return;
+
+    const ticketIds = eventTickets.map(t => t.id);
+    const eventId = eventTickets[0]?.eventId;
+
+    // Update local ticket state (auto-syncs to Supabase via setTickets)
+    setTickets(prev => prev.map(t =>
+      ticketIds.includes(t.id) ? { ...t, date: newDate } : t
+    ));
+
+    // Also update the events table directly
+    if (eventId) {
+      const { error } = await supabase
+        .from('events')
+        .update({ date: newDate })
+        .eq('id', eventId);
+      if (error) console.error('Event date update error:', error);
+    }
+
+    if (notify) notify("Date updated");
+  };
 
   const rowOpacity = isCompleted ? 0.65 : 1;
 
@@ -70,8 +101,29 @@ export default function EventGroup({
           </div>
         </div>
 
-        <div style={{ fontSize: 12, color: "#6b7280", width: 90, flexShrink: 0 }}>
-          {fmtDate(eventGroup.date)}{timeStr ? " · " + timeStr : ""}
+        <div style={{ fontSize: 12, color: "#6b7280", width: 90, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
+          {editingDate ? (
+            <input
+              ref={dateInputRef}
+              type="date"
+              defaultValue={eventGroup.date || ""}
+              autoFocus
+              onClick={e => e.stopPropagation()}
+              onBlur={e => saveDate(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setEditingDate(false); } }}
+              style={{ fontSize: 11, padding: "2px 4px", border: "1px solid #d1d5db", borderRadius: 4, width: 86, outline: "none", fontFamily: "inherit", color: "#111827", background: "white" }}
+            />
+          ) : (
+            <>
+              <span>{fmtDate(eventGroup.date)}{timeStr ? " · " + timeStr : ""}</span>
+              <span
+                onClick={e => { e.stopPropagation(); setEditingDate(true); }}
+                title="Edit date"
+                style={{ fontSize: 10, color: "#9ca3af", cursor: "pointer", opacity: 0, transition: "opacity 0.15s", lineHeight: 1 }}
+                className="date-edit-btn"
+              >✎</span>
+            </>
+          )}
         </div>
 
         <div style={{ fontSize: 12, color: "#6b7280", width: 60, flexShrink: 0 }}>{Object.keys(orderGroups).length} orders</div>

@@ -331,6 +331,7 @@ export default function App() {
         * { box-sizing: border-box; margin: 0; padding: 0; }
         .hover-row { transition: background 0.12s; }
         .hover-row:hover { background: #f7f8fa !important; }
+        *:hover > .date-edit-btn { opacity: 1 !important; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastIn { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
         .fade-up { animation: fadeUp 0.22s ease forwards; }
