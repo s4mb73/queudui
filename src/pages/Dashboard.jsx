@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { fmt, fmtPct } from "../utils/format";
 import { KpiCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
@@ -42,7 +43,8 @@ function describeAction(entry) {
   }
 }
 
-export default function Dashboard({ tickets, sales, events, setView, setShowAddTicket, setEditingTicket, setTf, blankTicket }) {
+export default function Dashboard({ tickets, sales, events, setShowAddTicket, setEditingTicket, setTf, blankTicket }) {
+  const navigate = useNavigate();
 
   // ── Recent Activity ───────────────────────────────────────────────────────
   const [activity, setActivity] = useState([]);
@@ -189,7 +191,7 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
               <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", letterSpacing: "-0.2px" }}>Completed Sales</div>
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>All matched transactions</div>
             </div>
-            {sales.length > 0 && <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setView("sales")}>View all</button>}
+            {sales.length > 0 && <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => navigate("/sales")}>View all</button>}
           </div>
           <div>
             {sales.length === 0 ? (
@@ -223,7 +225,7 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
             <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", letterSpacing: "-0.2px" }}>Current Stock</div>
             <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{Object.keys(stockGroups).length} events · {stockCount} tickets available</div>
           </div>
-          <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setView("inventory")}>View inventory</button>
+          <button className="ghost-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => navigate("/inventory")}>View inventory</button>
         </div>
         {Object.keys(stockGroups).length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#94a3b8", fontSize: 13 }}>No tickets in stock</div>
@@ -234,7 +236,7 @@ export default function Dashboard({ tickets, sales, events, setView, setShowAddT
               return (
                 <div
                   key={key}
-                  onClick={() => setView("inventory")}
+                  onClick={() => navigate("/inventory")}
                   style={{
                     padding: "13px 18px",
                     borderRight: "0.5px solid #f1f4f8",
