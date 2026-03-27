@@ -48,16 +48,23 @@ export default function Dashboard({ tickets, sales, events, setShowAddTicket, se
 
   // ── Recent Activity ───────────────────────────────────────────────────────
   const [activity, setActivity] = useState([]);
+  const [profileMap, setProfileMap] = useState({});
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("activity_log")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (!cancelled && data) setActivity(data);
-      if (error) console.error("activity_log fetch error:", error);
+      const [activityRes, profilesRes] = await Promise.all([
+        supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(20),
+        supabase.from("profiles").select("id, display_name, email, role"),
+      ]);
+      if (!cancelled) {
+        if (activityRes.data) setActivity(activityRes.data);
+        if (profilesRes.data) {
+          const map = {};
+          profilesRes.data.forEach(p => { map[p.id] = p; map[p.email] = p; });
+          setProfileMap(map);
+        }
+      }
+      if (activityRes.error) console.error("activity_log fetch error:", activityRes.error);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -277,8 +284,9 @@ export default function Dashboard({ tickets, sales, events, setShowAddTicket, se
           {activity.length === 0 ? (
             <div style={{ textAlign: "center", padding: "32px 0", color: "#94a3b8", fontSize: 13 }}>No recent activity</div>
           ) : activity.map((entry, i) => {
-            const initials = getInitials(entry.user_email);
-            const userName = entry.user_email ? entry.user_email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown";
+            const profile = profileMap[entry.user_id] || profileMap[entry.user_email];
+            const userName = profile?.display_name || (entry.user_email ? entry.user_email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown");
+            const initials = userName.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
             return (
               <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", borderBottom: i < activity.length - 1 ? "0.5px solid #f1f4f8" : "none" }}>
                 <div style={{
