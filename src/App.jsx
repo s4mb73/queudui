@@ -355,7 +355,7 @@ export default function App() {
         @media (max-width: 768px) {
           .desktop-sidebar { display: none !important; }
           .mobile-nav { display: flex !important; }
-          .main-content { padding: 16px !important; }
+          .main-content { padding: 16px !important; padding-bottom: 72px !important; }
           .top-bar { padding: 0 16px !important; }
           .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         }
@@ -471,6 +471,36 @@ export default function App() {
           </Routes>
         </div>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="mobile-nav" style={{
+        position: "fixed", bottom: 0, left: 0, right: 0, height: 56,
+        background: "#0f1729", borderTop: "1px solid rgba(255,255,255,0.1)",
+        display: "none", alignItems: "center", justifyContent: "space-around",
+        zIndex: 100, paddingBottom: "env(safe-area-inset-bottom)",
+      }}>
+        {[
+          { path: "/", label: "Dashboard", iconFn: Icons.dashboard },
+          { path: "/inventory", label: "Inventory", iconFn: Icons.inventory },
+          { path: "/sales", label: "Sales", iconFn: Icons.sales },
+          { path: "/emails", label: "Emails", iconFn: Icons.emails },
+          { path: "/tasks", label: "Tasks", iconFn: Icons.tasks },
+        ].map(item => {
+          const active = item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path);
+          return (
+            <button key={item.path} onClick={() => navigate(item.path)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+              padding: "6px 12px", fontFamily: "var(--body)",
+              color: active ? "#f97316" : "rgba(255,255,255,0.4)",
+              transition: "color 0.15s",
+            }}>
+              <span style={{ display: "flex", alignItems: "center" }}>{item.iconFn(active ? "#f97316" : "rgba(255,255,255,0.4)")}</span>
+              <span style={{ fontSize: 9, fontWeight: active ? 700 : 500, letterSpacing: "0.3px" }}>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {showAddTicket && (
         <AddTicketModal
