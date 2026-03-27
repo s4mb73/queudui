@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export function Badge({ children, type = "neutral" }) {
   const styles = {
@@ -180,22 +181,24 @@ Icons.team = (color = "currentColor") => (
 );
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
-export function Sidebar({ view, setView, profile, isAdmin, onSignOut }) {
+export function Sidebar({ profile, isAdmin, onSignOut }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const navItems = [
-    { id: "dashboard", label: "Dashboard", iconFn: Icons.dashboard },
-    { id: "inventory", label: "Inventory", iconFn: Icons.inventory },
-    { id: "sales",     label: "Sales",     iconFn: Icons.sales },
-    { id: "emails",    label: "Emails",    iconFn: Icons.emails },
-    { id: "tasks",     label: "Tasks",     iconFn: Icons.tasks },
-    ...(isAdmin ? [{ id: "team", label: "Team", iconFn: Icons.team }] : []),
-    ...(isAdmin ? [{ id: "settings", label: "Settings", iconFn: Icons.settings }] : []),
+    { id: "dashboard", path: "/",          label: "Dashboard", iconFn: Icons.dashboard },
+    { id: "inventory", path: "/inventory",  label: "Inventory", iconFn: Icons.inventory },
+    { id: "sales",     path: "/sales",      label: "Sales",     iconFn: Icons.sales },
+    { id: "emails",    path: "/emails",     label: "Emails",    iconFn: Icons.emails },
+    { id: "tasks",     path: "/tasks",      label: "Tasks",     iconFn: Icons.tasks },
+    ...(isAdmin ? [{ id: "team", path: "/team", label: "Team", iconFn: Icons.team }] : []),
+    ...(isAdmin ? [{ id: "settings", path: "/settings", label: "Settings", iconFn: Icons.settings }] : []),
   ];
 
-  const NavItem = ({ id, label, iconFn }) => {
-    const active = view === id;
+  const NavItem = ({ id, path, label, iconFn }) => {
+    const active = path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
     const iconColor = active ? "#ffffff" : "rgba(255,255,255,0.45)";
     return (
-      <button onClick={() => setView(id)} style={{
+      <button onClick={() => navigate(path)} style={{
         display: "flex", alignItems: "center", gap: 10, width: "100%",
         padding: "9px 12px",
         background: active ? "rgba(255,255,255,0.14)" : "transparent",

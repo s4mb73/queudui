@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useQueudData } from "./hooks/useQueudData";
 import { useAuth } from "./hooks/useAuth";
 import { uid, fmt, today, fetchExchangeRate } from "./utils/format";
@@ -50,7 +51,8 @@ export default function App() {
     loading, error,
   } = useQueudData(auth.user);
 
-  const [view, setView]                 = useState("dashboard");
+  const navigate = useNavigate();
+  const location = useLocation();
   const [toast, setToast]               = useState(null);
   const [showAddTicket, setShowAddTicket] = useState(false);
   const [showAddSale, setShowAddSale]   = useState(false);
@@ -350,14 +352,14 @@ export default function App() {
         select option { background: #ffffff; color: #0f172a; }
       `}</style>
 
-      <Sidebar view={view} setView={setView} profile={auth.profile} isAdmin={auth.isAdmin} onSignOut={auth.signOut} />
+      <Sidebar profile={auth.profile} isAdmin={auth.isAdmin} onSignOut={auth.signOut} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* Top bar */}
         <div style={{ background: "#ffffff", borderBottom: "0.5px solid #e2e6ea", padding: "0 28px", display: "flex", alignItems: "center", height: 52, flexShrink: 0, gap: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
           <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase" }}>Queud</span>
           <span style={{ fontSize: 11, color: "#e2e6ea" }}>/</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", textTransform: "capitalize", letterSpacing: "-0.1px" }}>{view}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", textTransform: "capitalize", letterSpacing: "-0.1px" }}>{location.pathname === "/" ? "Dashboard" : location.pathname.slice(1)}</span>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }} />
@@ -379,77 +381,84 @@ export default function App() {
 
         {/* Page content */}
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-          {view === "dashboard" && (
-            <Dashboard
-              tickets={tickets} sales={sales} events={events}
-              setView={setView}
-              setShowAddTicket={setShowAddTicket}
-              setEditingTicket={setEditingTicket}
-              setTf={setTf} blankTicket={BLANK_TICKET}
-            />
-          )}
-          {view === "inventory" && (
-            <Inventory
-              tickets={tickets} setTickets={setTickets}
-              sales={sales} setSales={setSales}
-              events={events}
-              settings={settings}
-              setShowAddTicket={setShowAddTicket}
-              setEditingTicket={setEditingTicket}
-              setTf={setTf} blankTicket={BLANK_TICKET}
-              openSale={openSale} notify={notify}
-              isAdmin={auth.isAdmin}
-              logActivity={logActivity}
-            />
-          )}
-          {view === "sales" && (
-            <Sales
-              tickets={tickets} sales={sales}
-              setSales={setSales} updateSale={updateSale}
-              setTickets={setTickets}
-              deleteSaleAndResetTickets={auth.isAdmin ? deleteSaleAndResetTickets : null}
-              linkTicketsToSale={linkTicketsToSale}
-              events={events}
-              setShowAddSale={setShowAddSale}
-              notify={notify}
-              isAdmin={auth.isAdmin}
-            />
-          )}
-          {view === "emails" && (
-            <Emails
-              settings={settings} setSettings={setSettings}
-              tickets={tickets} setTickets={setTickets}
-              sales={sales} setSales={setSales}
-              events={events} findOrCreateEvent={findOrCreateEvent}
-              notify={notify} importParsed={importParsed}
-            />
-          )}
-          {view === "tasks" && (
-            <Tasks
-              auth={auth}
-              events={events}
-              tickets={tickets}
-              notify={notify}
-            />
-          )}
-          {view === "team" && auth.isAdmin && (
-            <Team auth={auth} notify={notify} />
-          )}
-          {view === "settings" && auth.isAdmin && (
-            <Settings
-              settings={settings} setSettings={setSettings}
-              tickets={tickets} setTickets={setTickets}
-              sales={sales} setSales={setSales}
-              notify={notify}
-            />
-          )}
-          {view === "settings" && !auth.isAdmin && (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#64748b" }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>!</div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a", marginBottom: 6 }}>Admin Only</div>
-              <div style={{ fontSize: 13 }}>Settings are restricted to admin users.</div>
-            </div>
-          )}
+          <Routes>
+            <Route path="/" element={
+              <Dashboard
+                tickets={tickets} sales={sales} events={events}
+                setShowAddTicket={setShowAddTicket}
+                setEditingTicket={setEditingTicket}
+                setTf={setTf} blankTicket={BLANK_TICKET}
+              />
+            } />
+            <Route path="/inventory" element={
+              <Inventory
+                tickets={tickets} setTickets={setTickets}
+                sales={sales} setSales={setSales}
+                events={events}
+                settings={settings}
+                setShowAddTicket={setShowAddTicket}
+                setEditingTicket={setEditingTicket}
+                setTf={setTf} blankTicket={BLANK_TICKET}
+                openSale={openSale} notify={notify}
+                isAdmin={auth.isAdmin}
+                logActivity={logActivity}
+              />
+            } />
+            <Route path="/sales" element={
+              <Sales
+                tickets={tickets} sales={sales}
+                setSales={setSales} updateSale={updateSale}
+                setTickets={setTickets}
+                deleteSaleAndResetTickets={auth.isAdmin ? deleteSaleAndResetTickets : null}
+                linkTicketsToSale={linkTicketsToSale}
+                events={events}
+                setShowAddSale={setShowAddSale}
+                notify={notify}
+                isAdmin={auth.isAdmin}
+              />
+            } />
+            <Route path="/emails" element={
+              <Emails
+                settings={settings} setSettings={setSettings}
+                tickets={tickets} setTickets={setTickets}
+                sales={sales} setSales={setSales}
+                events={events} findOrCreateEvent={findOrCreateEvent}
+                notify={notify} importParsed={importParsed}
+              />
+            } />
+            <Route path="/tasks" element={
+              <Tasks
+                auth={auth}
+                events={events}
+                tickets={tickets}
+                notify={notify}
+              />
+            } />
+            <Route path="/team" element={
+              auth.isAdmin ? (
+                <Team auth={auth} notify={notify} />
+              ) : (
+                <Navigate to="/" replace />
+              )
+            } />
+            <Route path="/settings" element={
+              auth.isAdmin ? (
+                <Settings
+                  settings={settings} setSettings={setSettings}
+                  tickets={tickets} setTickets={setTickets}
+                  sales={sales} setSales={setSales}
+                  notify={notify}
+                />
+              ) : (
+                <div style={{ textAlign: "center", padding: "60px 0", color: "#64748b" }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>!</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a", marginBottom: 6 }}>Admin Only</div>
+                  <div style={{ fontSize: 13 }}>Settings are restricted to admin users.</div>
+                </div>
+              )
+            } />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </div>
       </div>
 
