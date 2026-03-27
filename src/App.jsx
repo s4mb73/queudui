@@ -4,7 +4,7 @@ import { useQueudData } from "./hooks/useQueudData";
 import { useAuth } from "./hooks/useAuth";
 import { uid, fmt, today, fetchExchangeRate } from "./utils/format";
 import { supabase } from "./lib/supabase";
-import { Sidebar } from "./components/ui";
+import { Sidebar, Icons } from "./components/ui";
 import { AddTicketModal, RecordSaleModal } from "./components/Modals";
 import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
@@ -351,13 +351,21 @@ export default function App() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #d1d9e0; border-radius: 4px; }
         select option { background: #ffffff; color: #0f172a; }
+        .mobile-nav { display: none; }
+        @media (max-width: 768px) {
+          .desktop-sidebar { display: none !important; }
+          .mobile-nav { display: flex !important; }
+          .main-content { padding: 16px !important; }
+          .top-bar { padding: 0 16px !important; }
+          .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        }
       `}</style>
 
       <Sidebar profile={auth.profile} isAdmin={auth.isAdmin} onSignOut={auth.signOut} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* Top bar */}
-        <div style={{ background: "#ffffff", borderBottom: "0.5px solid #e2e6ea", padding: "0 28px", display: "flex", alignItems: "center", height: 52, flexShrink: 0, gap: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div className="top-bar" style={{ background: "#ffffff", borderBottom: "0.5px solid #e2e6ea", padding: "0 28px", display: "flex", alignItems: "center", height: 52, flexShrink: 0, gap: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
           <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase" }}>Queud</span>
           <span style={{ fontSize: 11, color: "#e2e6ea" }}>/</span>
           <span style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6e", textTransform: "capitalize", letterSpacing: "-0.1px" }}>{location.pathname === "/" ? "Dashboard" : location.pathname.slice(1)}</span>
@@ -381,7 +389,7 @@ export default function App() {
         </div>
 
         {/* Page content */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
+        <div className="main-content" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
           <Routes>
             <Route path="/" element={
               <Dashboard
