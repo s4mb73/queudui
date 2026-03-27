@@ -123,8 +123,6 @@ function saleToDb(s) {
 
 // ── Main hook ────────────────────────────────────────────────────────────────
 
-const POLL_INTERVAL_MS = 30_000;
-
 export function useQueudData(user) {
   const [events, setEventsState]         = useState([]);
   const [tickets, setTicketsState]       = useState([]);
@@ -194,64 +192,84 @@ export function useQueudData(user) {
     load();
   }, []);
 
-  // ── Background polling ────────────────────────────────────────────────────
+  // ── Realtime subscriptions (replaces polling) ─────────────────────────────
   useEffect(() => {
     if (loading) return;
 
-    const interval = setInterval(async () => {
-      try {
-        const [{ data: t }, { data: s }, stMap] = await Promise.all([
-          supabase.from('tickets').select('*').order('added_at', { ascending: false }),
-          supabase.from('sales').select('*').order('recorded_at', { ascending: false }),
-          loadSaleTicketMap(),
-        ]);
-
-        if (t) {
-          setTicketsState(prev => {
-            const prevMap = new Map(prev.map(x => [x.id, x]));
-            const incoming = (t || []).map(dbToTicket);
-            let changed = false;
-            const merged = incoming.map(row => {
-              const existing = prevMap.get(row.id);
-              if (!existing) { changed = true; return row; }
-              if (!localMutationIds.current.has(row.id) && existing.status !== row.status) {
-                changed = true;
-                return { ...existing, status: row.status, qtyAvailable: row.qtyAvailable };
-              }
-              return existing;
+    const ticketChannel = supabase
+      .channel('tickets-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new;
+          if (!localMutationIds.current.has(row.id)) {
+            setTicketsState(prev => {
+              if (prev.find(t => t.id === row.id)) return prev;
+              return [dbToTicket(row), ...prev];
             });
-            const incomingIds = new Set(incoming.map(r => r.id));
-            prev.filter(p => !incomingIds.has(p.id)).forEach(p => { merged.push(p); changed = true; });
-            return changed ? merged : prev;
-          });
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          if (!localMutationIds.current.has(row.id)) {
+            setTicketsState(prev => prev.map(t => t.id === row.id ? { ...t, ...dbToTicket(row) } : t));
+          }
+        } else if (payload.eventType === 'DELETE') {
+          const id = payload.old.id;
+          setTicketsState(prev => prev.filter(t => t.id !== id));
         }
+      })
+      .subscribe();
 
-        if (s) {
-          setSalesState(prev => {
-            const prevIds = new Set(prev.map(x => x.id));
-            const incoming = (s || []).map(row => dbToSale(row, stMap));
-            const newSales = incoming.filter(r => !prevIds.has(r.id));
-            const upgraded = incoming.filter(r => {
-              if (!prevIds.has(r.id)) return false;
-              const existing = prev.find(p => p.id === r.id);
-              return existing && existing.saleStatus !== r.saleStatus
-                && !localMutationIds.current.has(r.id);
+    const salesChannel = supabase
+      .channel('sales-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, async (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new;
+          if (!localMutationIds.current.has(row.id)) {
+            const stMap = await loadSaleTicketMap();
+            setSalesState(prev => {
+              if (prev.find(s => s.id === row.id)) return prev;
+              return [dbToSale(row, stMap), ...prev];
             });
-            if (newSales.length === 0 && upgraded.length === 0) return prev;
-            const upgradedIds = new Set(upgraded.map(r => r.id));
-            return [
-              ...prev.filter(p => !upgradedIds.has(p.id)),
-              ...upgraded,
-              ...newSales,
-            ].sort((a, b) => new Date(b.recordedAt || 0) - new Date(a.recordedAt || 0));
-          });
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          if (!localMutationIds.current.has(row.id)) {
+            setSalesState(prev => prev.map(s => s.id === row.id ? { ...s, ...dbToSale(row, {}) } : s));
+          }
+        } else if (payload.eventType === 'DELETE') {
+          const id = payload.old.id;
+          setSalesState(prev => prev.filter(s => s.id !== id));
         }
-      } catch (e) {
-        console.warn('[poll] error:', e.message);
-      }
-    }, POLL_INTERVAL_MS);
+      })
+      .subscribe();
 
-    return () => clearInterval(interval);
+    const eventsChannel = supabase
+      .channel('events-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setEventsState(prev => {
+            if (prev.find(e => e.id === payload.new.id)) return prev;
+            return [...prev, dbToEvent(payload.new)];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          setEventsState(prev => prev.map(e => e.id === payload.new.id ? dbToEvent(payload.new) : e));
+        } else if (payload.eventType === 'DELETE') {
+          setEventsState(prev => prev.filter(e => e.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    // Clear local mutation IDs after 5 seconds to allow realtime updates
+    const cleanupInterval = setInterval(() => {
+      localMutationIds.current.clear();
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(ticketChannel);
+      supabase.removeChannel(salesChannel);
+      supabase.removeChannel(eventsChannel);
+      clearInterval(cleanupInterval);
+    };
   }, [loading]);
 
   // ── Events CRUD ───────────────────────────────────────────────────────────
