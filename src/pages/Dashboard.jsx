@@ -18,29 +18,61 @@ function timeAgo(dateStr) {
   return Math.floor(days / 30) + "mo ago";
 }
 
-function getInitials(email) {
-  if (!email) return "?";
-  const name = email.split("@")[0];
-  const parts = name.split(/[._-]/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+function formatTime(dateStr) {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
+
+function getDayLabel(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const entryDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  if (entryDay.getTime() === today.getTime()) return "Today";
+  if (entryDay.getTime() === yesterday.getTime()) return "Yesterday";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+}
+
+const ACTION_ICONS = {
+  ticket_added: { icon: "+", bg: "rgba(5,150,105,0.1)", color: "#059669" },
+  ticket_edited: { icon: "E", bg: "rgba(26,58,110,0.08)", color: "#1a3a6e" },
+  tickets_imported: { icon: "I", bg: "rgba(124,58,237,0.08)", color: "#7c3aed" },
+  sale_recorded: { icon: "$", bg: "rgba(249,115,22,0.08)", color: "#f97316" },
+};
 
 function describeAction(entry) {
   const d = entry.details || {};
   const event = d.event_name || d.event || "an event";
   switch (entry.action) {
     case "ticket_added":
-      return `added ${d.qty || ""} ticket${(d.qty || 0) !== 1 ? "s" : ""} for ${event}`;
+      return { text: `added ${d.qty || ""} ticket${(d.qty || 0) !== 1 ? "s" : ""} for `, highlight: event };
     case "ticket_edited":
-      return `edited ticket for ${event}`;
+      return { text: "edited ticket for ", highlight: event };
     case "tickets_imported":
-      return `imported ${d.count || "?"} tickets for ${event}`;
+      return { text: `imported ${d.count || "?"} tickets for `, highlight: event };
     case "sale_recorded":
-      return `recorded sale of ${d.qtySold || "?"}x for ${event}`;
+      return { text: `recorded sale of ${d.qtySold || "?"}x for `, highlight: event, sub: d.salePrice ? ` · ${fmt(d.salePrice)}` : "" };
     default:
-      return entry.action.replace(/_/g, " ");
+      return { text: entry.action.replace(/_/g, " "), highlight: "" };
   }
+}
+
+function groupByDay(entries) {
+  const groups = [];
+  let currentLabel = null;
+  let currentGroup = null;
+  for (const entry of entries) {
+    const label = getDayLabel(entry.created_at);
+    if (label !== currentLabel) {
+      currentLabel = label;
+      currentGroup = { label, entries: [] };
+      groups.push(currentGroup);
+    }
+    currentGroup.entries.push(entry);
+  }
+  return groups;
 }
 
 export default function Dashboard({ tickets, sales, events, setShowAddTicket, setEditingTicket, setTf, blankTicket }) {
@@ -280,33 +312,57 @@ export default function Dashboard({ tickets, sales, events, setShowAddTicket, se
           <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", letterSpacing: "-0.2px" }}>Recent Activity</div>
           <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Latest actions across your team</div>
         </div>
-        <div>
-          {activity.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "32px 0", color: "#94a3b8", fontSize: 13 }}>No recent activity</div>
-          ) : activity.map((entry, i) => {
-            const profile = profileMap[entry.user_id] || profileMap[entry.user_email];
-            const userName = profile?.display_name || (entry.user_email ? entry.user_email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown");
-            const initials = userName.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
-            return (
-              <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", borderBottom: i < activity.length - 1 ? "0.5px solid #f1f4f8" : "none" }}>
-                <div style={{
-                  width: 30, height: 30, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #1a3a6e, #2a5298)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
-                  letterSpacing: "0.5px",
-                }}>{initials}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    <span style={{ fontWeight: 600 }}>{userName}</span>{" "}
-                    <span style={{ color: "#475569" }}>{describeAction(entry)}</span>
-                  </div>
+        {activity.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#94a3b8", fontSize: 13 }}>No recent activity</div>
+        ) : (
+          <div style={{ padding: "0 18px 14px" }}>
+            {groupByDay(activity).map((group, gi) => (
+              <div key={group.label}>
+                {/* Day header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0 8px" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a", letterSpacing: "0.3px", textTransform: "uppercase", flexShrink: 0 }}>{group.label}</span>
+                  <div style={{ flex: 1, height: 1, background: "#f0f0f3" }} />
                 </div>
-                <div style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0, whiteSpace: "nowrap" }}>{timeAgo(entry.created_at)}</div>
+
+                {/* Entries */}
+                {group.entries.map((entry, i) => {
+                  const profile = profileMap[entry.user_id] || profileMap[entry.user_email];
+                  const userName = profile?.display_name || (entry.user_email ? entry.user_email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown");
+                  const action = describeAction(entry);
+                  const iconCfg = ACTION_ICONS[entry.action] || { icon: "?", bg: "#f1f5f9", color: "#64748b" };
+
+                  return (
+                    <div key={entry.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "7px 0", position: "relative" }}>
+                      {/* Timeline line */}
+                      {i < group.entries.length - 1 && (
+                        <div style={{ position: "absolute", left: 13, top: 32, bottom: -7, width: 1, background: "#e8eaed" }} />
+                      )}
+                      {/* Action icon */}
+                      <div style={{
+                        width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                        background: iconCfg.bg, color: iconCfg.color,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11, fontWeight: 700, fontFamily: "'DM Sans', sans-serif",
+                        position: "relative", zIndex: 1,
+                      }}>{iconCfg.icon}</div>
+                      {/* Content */}
+                      <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
+                        <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ fontWeight: 600, color: "#0f172a" }}>{userName}</span>{" "}
+                          <span>{action.text}</span>
+                          {action.highlight && <span style={{ fontWeight: 600, color: "#0f172a" }}>{action.highlight}</span>}
+                          {action.sub && <span style={{ color: "#059669", fontWeight: 600 }}>{action.sub}</span>}
+                        </div>
+                      </div>
+                      {/* Time */}
+                      <div style={{ fontSize: 10, color: "#b0b8c4", flexShrink: 0, paddingTop: 3, whiteSpace: "nowrap" }}>{formatTime(entry.created_at)}</div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
