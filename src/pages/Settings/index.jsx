@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { today } from "../../utils/format";
 import EmailAccounts    from "./EmailAccounts";
 import AIEmailParsing   from "./AIEmailParsing";
 import DataManagement   from "./DataManagement";
 
 export default function Settings({ settings, setSettings, tickets, setTickets, sales, setSales, notify }) {
+  const navigate = useNavigate();
   const [aycdApiKey, setAycdApiKey]     = useState(settings.aycdApiKey || "");
   const [accountsTab, setAccountsTab]   = useState("gmail");
 
@@ -44,6 +46,22 @@ export default function Settings({ settings, setSettings, tickets, setTickets, s
       </div>
 
       <div style={{ display: "grid", gap: 10, maxWidth: 760 }}>
+        {/* Admin Tools */}
+        <div style={{ background: "white", border: "0.5px solid #e8e8ec", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "0.5px solid #f0f0f3", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, background: "rgba(26,58,110,0.08)", border: "0.5px solid rgba(26,58,110,0.15)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>!</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>Admin Tools</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Data management and cleanup</div>
+            </div>
+          </div>
+          <div style={{ padding: "12px 18px", display: "flex", gap: 8 }}>
+            <button onClick={() => navigate("/events")} className="ghost-btn" style={{ fontSize: 12 }}>
+              Merge Duplicate Events
+            </button>
+          </div>
+        </div>
+
         <EmailAccounts
           settings={settings} setSettings={setSettings}
           gmailAccounts={gmailAccounts}

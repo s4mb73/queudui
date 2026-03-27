@@ -14,6 +14,7 @@ import Team from "./pages/Team";
 import Tasks from "./pages/Tasks";
 import Emails from "./pages/Emails";
 import Login from "./pages/Login";
+import EventMerge from "./pages/EventMerge";
 
 const BLANK_TICKET = {
   event: "", date: "", time: "", venue: "",
@@ -457,6 +458,7 @@ export default function App() {
                 </div>
               )
             } />
+            <Route path="/events" element={auth.isAdmin ? <EventMerge notify={notify} /> : <Navigate to="/" />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
